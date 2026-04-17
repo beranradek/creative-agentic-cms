@@ -622,8 +622,24 @@ export function App() {
 function PreviewComponent(props: { component: Component; page: Page; projectId: string }) {
   const { component, page, projectId } = props;
   if (component.type === "hero") {
+    const bgAsset =
+      component.backgroundImageAssetId ? page.assets.find((a) => a.type === "image" && a.id === component.backgroundImageAssetId) : null;
+    const heroStyle =
+      bgAsset && bgAsset.type === "image"
+        ? {
+            backgroundImage: [
+              "radial-gradient(900px 380px at 15% 15%, rgba(124, 92, 255, 0.35), transparent 60%)",
+              "radial-gradient(900px 380px at 70% 20%, rgba(34, 211, 238, 0.2), transparent 60%)",
+              "linear-gradient(180deg, rgba(0,0,0,0.60), rgba(0,0,0,0.20))",
+              `url(/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(bgAsset.filename)})`,
+            ].join(", "),
+            backgroundSize: ["auto", "auto", "cover", "cover"].join(", "),
+            backgroundPosition: ["0 0", "0 0", "center", "center"].join(", "),
+            backgroundRepeat: ["no-repeat", "no-repeat", "no-repeat", "no-repeat"].join(", "),
+          }
+        : undefined;
     return (
-      <div className="hero">
+      <div className="hero" style={heroStyle}>
         <h1>{component.headline}</h1>
         <p>{component.subheadline}</p>
         <a className="cta" href={component.primaryCtaHref}>
@@ -801,7 +817,13 @@ function Inspector(props: {
           ))}
         </div>
 
-        {component ? <ComponentFields component={component} onUpdate={(next) => updateComponent(section, next, onUpdate)} /> : null}
+        {component ? (
+          <ComponentFields
+            component={component}
+            imageAssets={imageAssets}
+            onUpdate={(next) => updateComponent(section, next, onUpdate)}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -815,8 +837,12 @@ function updateComponent(section: Section, next: Component, onUpdate: (next: Sec
   onUpdate(updated);
 }
 
-function ComponentFields(props: { component: Component; onUpdate: (next: Component) => void }) {
-  const { component, onUpdate } = props;
+function ComponentFields(props: {
+  component: Component;
+  imageAssets: Array<{ id: string; filename: string; alt: string }>;
+  onUpdate: (next: Component) => void;
+}) {
+  const { component, imageAssets, onUpdate } = props;
 
   if (component.type === "hero") {
     return (
@@ -824,6 +850,20 @@ function ComponentFields(props: { component: Component; onUpdate: (next: Compone
         <div className="field">
           <label>Headline</label>
           <input value={component.headline} onChange={(e) => onUpdate({ ...component, headline: e.target.value })} />
+        </div>
+        <div className="field">
+          <label>Background image</label>
+          <select
+            value={component.backgroundImageAssetId ?? ""}
+            onChange={(e) => onUpdate({ ...component, backgroundImageAssetId: e.target.value ? e.target.value : null })}
+          >
+            <option value="">(none)</option>
+            {imageAssets.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.filename}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="field">
           <label>Subheadline</label>

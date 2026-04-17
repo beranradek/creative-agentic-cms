@@ -11,8 +11,16 @@ function escapeHtml(text: string): string {
 
 function renderComponent(component: Component, assetsById: Map<string, Asset>): string {
   if (component.type === "hero") {
+    const bgAsset =
+      component.backgroundImageAssetId && component.backgroundImageAssetId.length
+        ? assetsById.get(component.backgroundImageAssetId)
+        : null;
+    const style =
+      bgAsset && bgAsset.type === "image"
+        ? ` style="background-image: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), linear-gradient(180deg, rgba(0,0,0,0.60), rgba(0,0,0,0.20)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;"`
+        : "";
     return `
-      <section class="hero">
+      <section class="hero"${style}>
         <h1>${escapeHtml(component.headline)}</h1>
         <p>${escapeHtml(component.subheadline)}</p>
         <a class="cta" href="${escapeHtml(component.primaryCtaHref)}">${escapeHtml(component.primaryCtaText)}</a>
