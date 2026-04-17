@@ -4,6 +4,7 @@ automaker/
 temp/
 temp-docs/
 .workspace/
+projects/
 
 nul
 issues/

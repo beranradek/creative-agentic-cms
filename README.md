@@ -58,6 +58,25 @@ also with examples of pre-created test pages and test assets and contents for mu
 
 ## Local Development Environment
 
+### Quickstart
+
+```bash
+pnpm install
+cp .env.example .env
+
+# Terminal 1
+pnpm dev:server
+
+# Terminal 2
+pnpm dev:web
+```
+
+Open `http://localhost:5173`.
+
+Project data is stored locally in `./projects/<projectId>/`:
+- `page.json` (page structure/content)
+- `assets/` (uploaded images)
+
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) ≥ 20
