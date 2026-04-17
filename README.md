@@ -69,11 +69,23 @@ also with examples of pre-created test pages and test assets and contents for mu
 cp .env.example .env
 ```
 
+Notes:
+- `.env` is gitignored (do not commit secrets).
+- `OPENAI_API_KEY` is required when `MODEL` points to an OpenAI model (for the agent features).
+
 ### Running Tests
 
 ```bash
+# Install deps (recommended)
+pnpm install
+
 # All packages
 pnpm test
+
+# E2E (Playwright)
+pnpm --filter @cac/web exec playwright install
+# Linux (if needed): pnpm --filter @cac/web exec playwright install-deps
+pnpm --filter @cac/web test:e2e
 
 # Single package
 cd packages/<package> && pnpm test

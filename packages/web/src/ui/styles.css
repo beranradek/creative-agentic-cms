@@ -1,0 +1,258 @@
+:root {
+  color-scheme: light;
+  --bg: #0b0d12;
+  --panel: #101522;
+  --text: #e8eefc;
+  --muted: #a7b3d6;
+  --line: rgba(255, 255, 255, 0.08);
+  --accent: #7c5cff;
+  --accent2: #22d3ee;
+  --danger: #ff4d6d;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 600px at 15% 10%, rgba(124, 92, 255, 0.35), transparent 55%),
+    radial-gradient(900px 500px at 70% 20%, rgba(34, 211, 238, 0.22), transparent 55%),
+    var(--bg);
+  color: var(--text);
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 340px 1fr 420px;
+  gap: 12px;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panelHeader {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panelHeader h2 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.panelBody {
+  padding: 14px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(124, 92, 255, 0.5);
+  background: rgba(124, 92, 255, 0.12);
+}
+
+.btnPrimary {
+  border-color: rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.18);
+}
+
+.btnDanger:hover {
+  border-color: rgba(255, 77, 109, 0.6);
+  background: rgba(255, 77, 109, 0.16);
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.cardTitle {
+  font-weight: 800;
+  font-size: 13px;
+  margin: 0 0 6px 0;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.canvas {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.preview {
+  padding: 20px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.hero {
+  border-radius: 18px;
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: radial-gradient(900px 380px at 15% 15%, rgba(124, 92, 255, 0.35), transparent 60%),
+    radial-gradient(900px 380px at 70% 20%, rgba(34, 211, 238, 0.2), transparent 60%),
+    rgba(0, 0, 0, 0.22);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 42px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  margin: 12px 0 0 0;
+  color: rgba(232, 238, 252, 0.88);
+  max-width: 60ch;
+  line-height: 1.45;
+}
+
+.cta {
+  display: inline-flex;
+  margin-top: 18px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 92, 255, 0.6);
+  background: rgba(124, 92, 255, 0.2);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.richText {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.imageBlock {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.imageBlock img {
+  max-width: 100%;
+  border-radius: 12px;
+  display: block;
+}
+
+.imageCaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.contactForm {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.contactForm h3 {
+  margin: 0 0 12px 0;
+}
+
+.contactForm form {
+  display: grid;
+  gap: 10px;
+}
+
+.contactForm button {
+  justify-self: start;
+}
+

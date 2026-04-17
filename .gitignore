@@ -3,6 +3,7 @@ generations/
 automaker/
 temp/
 temp-docs/
+.workspace/
 
 nul
 issues/
@@ -136,10 +137,10 @@ ui/.vite/
 .stylelintcache
 
 # ===================
-# Lock files (except package-lock.json)
+# Lock files (keep pnpm-lock.yaml tracked)
 # ===================
+package-lock.json
 yarn.lock
-pnpm-lock.yaml
 poetry.lock
 Pipfile.lock
 
@@ -158,3 +159,6 @@ Pipfile.lock
 .temp/
 tmpclaude-*-cwd
 ui/test-results/
+packages/web/test-results/
+packages/web/playwright-report/
+packages/web/vite.config.ts.timestamp-*.mjs
