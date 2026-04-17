@@ -64,11 +64,8 @@ also with examples of pre-created test pages and test assets and contents for mu
 pnpm install
 cp .env.example .env
 
-# Terminal 1
-pnpm dev:server
-
-# Terminal 2
-pnpm dev:web
+# Starts: shared/agent/server builds (watch) + API server + web UI
+pnpm dev
 ```
 
 Open `http://localhost:5173`.
