@@ -15,8 +15,8 @@ export const ImageAssetSchema = z.object({
   type: z.literal("image"),
   filename: z.string().min(1),
   mimeType: z.string().min(1),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
+  width: z.number().int().positive().nullable().default(null),
+  height: z.number().int().positive().nullable().default(null),
   alt: z.string().default(""),
 });
 
@@ -29,7 +29,7 @@ export const HeroComponentSchema = z.object({
   subheadline: z.string().default("A short, meaningful subheadline."),
   primaryCtaText: z.string().default("Get started"),
   primaryCtaHref: z.string().default("#contact"),
-  backgroundImageAssetId: AssetIdSchema.optional(),
+  backgroundImageAssetId: AssetIdSchema.nullable().default(null),
 });
 
 export const RichTextComponentSchema = z.object({
