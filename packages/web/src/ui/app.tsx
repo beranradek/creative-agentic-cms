@@ -55,6 +55,17 @@ function createImageComponent(assetId: string): Component {
   return { id: createId("cmp"), type: "image", assetId, caption: "" };
 }
 
+function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex === toIndex) return items;
+  if (fromIndex < 0 || fromIndex >= items.length) return items;
+  if (toIndex < 0 || toIndex >= items.length) return items;
+  const copy = items.slice();
+  const [item] = copy.splice(fromIndex, 1);
+  if (item === undefined) return items;
+  copy.splice(toIndex, 0, item);
+  return copy;
+}
+
 async function apiGetPage(projectId: string): Promise<Page> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
   if (!res.ok) throw new Error(`Failed to load page (${res.status})`);
@@ -219,6 +230,18 @@ export function App() {
         section.components.push(component);
         const next: Page = { ...prev, sections: [...prev.sections, section] };
         return PageSchema.parse(next);
+      });
+    },
+    [updatePage]
+  );
+
+  const moveSection = useCallback(
+    (sectionId: string, delta: -1 | 1) => {
+      updatePage((prev) => {
+        const index = prev.sections.findIndex((s) => s.id === sectionId);
+        if (index < 0) return prev;
+        const nextSections = moveInArray(prev.sections, index, index + delta);
+        return PageSchema.parse({ ...prev, sections: nextSections });
       });
     },
     [updatePage]
@@ -540,11 +563,21 @@ export function App() {
               </div>
 
               <div className="list">
-                {page.sections.map((section) => (
+                {page.sections.map((section, idx) => (
                   <div key={section.id} className="card">
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="cardTitle">{section.label}</div>
                       <div className="row">
+                        <button className="btn" onClick={() => moveSection(section.id, -1)} disabled={idx === 0}>
+                          ↑
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => moveSection(section.id, 1)}
+                          disabled={idx === page.sections.length - 1}
+                        >
+                          ↓
+                        </button>
                         <button className="btn btnDanger" onClick={() => removeSection(section.id)}>
                           Remove
                         </button>
@@ -684,6 +717,30 @@ function Inspector(props: {
     onUpdate(next);
   }, [onUpdate, section, selectedImageAssetId]);
 
+  const moveComponent = useCallback(
+    (componentId: string, delta: -1 | 1) => {
+      const index = section.components.findIndex((c) => c.id === componentId);
+      if (index < 0) return;
+      const next: Section = {
+        ...section,
+        components: moveInArray(section.components, index, index + delta),
+      };
+      onUpdate(next);
+    },
+    [onUpdate, section]
+  );
+
+  const removeComponent = useCallback(
+    (componentId: string) => {
+      const next: Section = {
+        ...section,
+        components: section.components.filter((c) => c.id !== componentId),
+      };
+      onUpdate(next);
+    },
+    [onUpdate, section]
+  );
+
   return (
     <div className="card">
       <div className="cardTitle">Inspector</div>
@@ -719,12 +776,27 @@ function Inspector(props: {
         </div>
 
         <div className="list">
-          {section.components.map((c) => (
+          {section.components.map((c, idx) => (
             <div key={c.id} className="row" style={{ justifyContent: "space-between" }}>
               <button className="btn" onClick={() => onSelect(c.id)}>
                 {c.type}
               </button>
-              <span className="badge">{c.id.slice(0, 8)}</span>
+              <div className="row">
+                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={idx === 0}>
+                  ↑
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => moveComponent(c.id, 1)}
+                  disabled={idx === section.components.length - 1}
+                >
+                  ↓
+                </button>
+                <button className="btn btnDanger" onClick={() => removeComponent(c.id)}>
+                  Remove
+                </button>
+                <span className="badge">{c.id.slice(0, 8)}</span>
+              </div>
             </div>
           ))}
         </div>
