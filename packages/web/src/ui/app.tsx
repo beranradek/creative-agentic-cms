@@ -33,6 +33,7 @@ function createComponent(type: Component["type"]): Component {
       subheadline: "A creative, local-first CMS editor with an agent that can reshape the page as you build.",
       primaryCtaText: "Contact",
       primaryCtaHref: "#contact",
+      backgroundImageAssetId: null,
     };
   }
   if (type === "rich_text") {
