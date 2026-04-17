@@ -117,9 +117,22 @@ async function apiExport(projectId: string): Promise<{ outputDir: string }> {
   return { outputDir };
 }
 
+async function apiListProjects(): Promise<string[]> {
+  const res = await fetch("/api/projects");
+  const json = (await res.json()) as unknown;
+  if (!res.ok) {
+    const err = (json as { error?: string }).error ?? `Projects error (${res.status})`;
+    throw new Error(err);
+  }
+  return z.array(z.string()).parse((json as { projects?: unknown }).projects);
+}
+
 export function App() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
   const [state, setState] = useState<LoadState>({ kind: "idle" });
+  const [projects, setProjects] = useState<string[]>([]);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [agentText, setAgentText] = useState("");
@@ -145,20 +158,40 @@ export function App() {
     return selectedSection.components.find((c) => c.id === selected.componentId) ?? null;
   }, [selectedSection, selected]);
 
-  const load = useCallback(async () => {
+  const refreshProjects = useCallback(async () => {
+    setIsProjectsLoading(true);
+    setProjectsError(null);
+    try {
+      const next = await apiListProjects();
+      setProjects(next);
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsProjectsLoading(false);
+    }
+  }, []);
+
+  const load = useCallback(async (projectIdOverride?: string) => {
+    const effectiveProjectId = projectIdOverride ?? projectId;
+    if (projectIdOverride && projectIdOverride !== projectId) setProjectId(projectIdOverride);
     setState({ kind: "loading" });
     try {
-      const next = await apiGetPage(projectId);
+      const next = await apiGetPage(effectiveProjectId);
       setState({ kind: "ready", page: next });
       setSelected(null);
+      void refreshProjects();
     } catch (error) {
       setState({ kind: "error", message: error instanceof Error ? error.message : "Unknown error" });
     }
-  }, [projectId]);
+  }, [projectId, refreshProjects]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void refreshProjects();
+  }, [refreshProjects]);
 
   const save = useCallback(async () => {
     if (!page) return;
@@ -277,6 +310,31 @@ export function App() {
               <div className="muted">
                 Storage is local (filesystem). Current project: <b>{projectId}</b>
               </div>
+              <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
+                <div className="muted">Projects</div>
+                <button className="btn" onClick={() => void refreshProjects()} disabled={isProjectsLoading}>
+                  {isProjectsLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+              {projectsError ? <div className="muted">Failed to load projects: {projectsError}</div> : null}
+              {projects.length ? (
+                <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+                  {projects.map((p) => (
+                    <button
+                      key={p}
+                      className="btn"
+                      style={{ padding: "6px 10px", opacity: p === projectId ? 1 : 0.8 }}
+                      onClick={() => {
+                        void load(p);
+                      }}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="muted">No projects yet. Load a new project id to create one.</div>
+              )}
             </div>
 
             <button
