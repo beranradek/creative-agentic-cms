@@ -760,20 +760,82 @@ export function App() {
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
                           onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
-                          onMoveHere={(fromComponentId) =>
+                          onMoveHere={(fromSectionId, fromComponentId) => {
                             updatePage((prev) => {
+                              const fromSection = prev.sections.find((s) => s.id === fromSectionId);
+                              const toSection = prev.sections.find((s) => s.id === section.id);
+                              if (!fromSection || !toSection) return prev;
+
+                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
+                              if (!moving) return prev;
+
                               const nextSections = prev.sections.map((s) => {
-                                if (s.id !== section.id) return s;
-                                const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
-                                const toIndex = s.components.findIndex((c) => c.id === component.id);
-                                if (fromIndex < 0 || toIndex < 0) return s;
-                                return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
+                                if (s.id === fromSectionId && s.id === section.id) {
+                                  const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
+                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
+                                  if (fromIndex < 0 || toIndex < 0) return s;
+                                  return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
+                                }
+
+                                if (s.id === fromSectionId) {
+                                  return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
+                                }
+
+                                if (s.id === section.id) {
+                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
+                                  if (toIndex < 0) return s;
+                                  const next = s.components.slice();
+                                  next.splice(toIndex, 0, moving);
+                                  return { ...s, components: next };
+                                }
+
+                                return s;
                               });
+
                               return PageSchema.parse({ ...prev, sections: nextSections });
-                            })
-                          }
+                            });
+
+                            setSelected((prevSel) =>
+                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
+                            );
+                          }}
                         />
                       ))}
+                      <PreviewDropZone
+                        key={`${section.id}-dropzone`}
+                        sectionId={section.id}
+                        onMoveToEnd={(fromSectionId, fromComponentId) => {
+                          updatePage((prev) => {
+                            const fromSection = prev.sections.find((s) => s.id === fromSectionId);
+                            const toSection = prev.sections.find((s) => s.id === section.id);
+                            if (!fromSection || !toSection) return prev;
+                            const moving = fromSection.components.find((c) => c.id === fromComponentId);
+                            if (!moving) return prev;
+
+                            const nextSections = prev.sections.map((s) => {
+                              if (s.id === fromSectionId && s.id === section.id) {
+                                const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
+                                const toIndex = s.components.length - 1;
+                                if (fromIndex < 0) return s;
+                                return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
+                              }
+                              if (s.id === fromSectionId) {
+                                return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
+                              }
+                              if (s.id === section.id) {
+                                return { ...s, components: [...s.components, moving] };
+                              }
+                              return s;
+                            });
+
+                            return PageSchema.parse({ ...prev, sections: nextSections });
+                          });
+
+                          setSelected((prevSel) =>
+                            prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
+                          );
+                        }}
+                      />
                     </div>
                   ))}
                 </div>
@@ -918,7 +980,7 @@ function PreviewComponent(props: {
   isSelected: boolean;
   onSelect: () => void;
   onUpdate: (next: Component) => void;
-  onMoveHere: (fromComponentId: string) => void;
+  onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
 }) {
   const { sectionId, component, page, projectId, isSelected, onSelect, onUpdate, onMoveHere } = props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
@@ -929,16 +991,14 @@ function PreviewComponent(props: {
     onDragOver: (e: React.DragEvent) => {
       const payload = getDragPayload(e);
       if (!payload || payload.kind !== "component") return;
-      if (payload.sectionId !== sectionId) return;
       e.preventDefault();
     },
     onDrop: (e: React.DragEvent) => {
       const payload = getDragPayload(e);
       if (!payload || payload.kind !== "component") return;
-      if (payload.sectionId !== sectionId) return;
       e.preventDefault();
-      if (payload.componentId === component.id) return;
-      onMoveHere(payload.componentId);
+      if (payload.sectionId === sectionId && payload.componentId === component.id) return;
+      onMoveHere(payload.sectionId, payload.componentId);
     },
   };
   if (component.type === "hero") {
@@ -1127,6 +1187,39 @@ function PreviewComponent(props: {
   }
 
   return null;
+}
+
+function PreviewDropZone(props: {
+  sectionId: string;
+  onMoveToEnd: (fromSectionId: string, fromComponentId: string) => void;
+}) {
+  const { sectionId, onMoveToEnd } = props;
+  const [isOver, setIsOver] = useState(false);
+
+  return (
+    <div
+      className="previewDropZone"
+      data-testid="preview-dropzone"
+      data-section-id={sectionId}
+      style={isOver ? { borderColor: "rgba(124, 92, 255, 0.8)", background: "rgba(124, 92, 255, 0.10)" } : undefined}
+      onDragOver={(e) => {
+        const payload = getDragPayload(e);
+        if (!payload || payload.kind !== "component") return;
+        e.preventDefault();
+        setIsOver(true);
+      }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={(e) => {
+        const payload = getDragPayload(e);
+        if (!payload || payload.kind !== "component") return;
+        e.preventDefault();
+        setIsOver(false);
+        onMoveToEnd(payload.sectionId, payload.componentId);
+      }}
+    >
+      Drop here to append
+    </div>
+  );
 }
 
 function Inspector(props: {

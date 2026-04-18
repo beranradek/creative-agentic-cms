@@ -208,6 +208,15 @@ body {
   outline-color: rgba(124, 92, 255, 0.85);
 }
 
+.previewDropZone {
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: rgba(232, 238, 252, 0.55);
+  font-size: 12px;
+  text-align: center;
+}
+
 .hero {
   border-radius: 18px;
   padding: 32px;

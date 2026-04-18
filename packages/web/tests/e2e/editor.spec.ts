@@ -51,6 +51,26 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   expect(types[1]).toBe("hero");
 });
 
+test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_cross_section_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  await hero.dragTo(text);
+
+  const cards = page.getByTestId("structure-section-card");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("2 components");
+});
+
 test("components can be reordered via drag and drop in Preview (within a section)", async ({ page }) => {
   await page.goto("/");
 
