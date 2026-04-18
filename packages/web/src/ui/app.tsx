@@ -67,6 +67,66 @@ function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
   return copy;
 }
 
+function sanitizeRichTextHtml(inputHtml: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${inputHtml}</div>`, "text/html");
+  const wrapper = doc.body.firstElementChild;
+  if (!wrapper) return "";
+
+  const outDoc = document.implementation.createHTMLDocument("");
+  const outWrapper = outDoc.createElement("div");
+
+  const allowedTags = new Set(["p", "br", "strong", "em", "a", "ul", "ol", "li"]);
+
+  function sanitizeHref(raw: string | null): string | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("#") || trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return trimmed;
+    if (trimmed.startsWith("mailto:")) return trimmed;
+    try {
+      const url = new URL(trimmed, window.location.href);
+      if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function appendSanitized(parent: HTMLElement, node: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parent.appendChild(outDoc.createTextNode(node.textContent ?? ""));
+      return;
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+
+    if (!allowedTags.has(tag)) {
+      for (const child of Array.from(el.childNodes)) appendSanitized(parent, child);
+      return;
+    }
+
+    const outEl = outDoc.createElement(tag);
+    if (tag === "a") {
+      const href = sanitizeHref(el.getAttribute("href"));
+      if (href) outEl.setAttribute("href", href);
+      const target = el.getAttribute("target");
+      if (target === "_blank") {
+        outEl.setAttribute("target", "_blank");
+        outEl.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+
+    for (const child of Array.from(el.childNodes)) appendSanitized(outEl, child);
+    parent.appendChild(outEl);
+  }
+
+  for (const child of Array.from(wrapper.childNodes)) appendSanitized(outWrapper, child);
+  return outWrapper.innerHTML;
+}
+
 async function apiGetPage(projectId: string): Promise<Page> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
   if (!res.ok) throw new Error(`Failed to load page (${res.status})`);
@@ -221,6 +281,22 @@ export function App() {
       setState({ kind: "ready", page: updater(page) });
     },
     [page]
+  );
+
+  const updateComponentInPage = useCallback(
+    (sectionId: string, componentId: string, updater: (prev: Component) => Component) => {
+      updatePage((prev) => {
+        const nextSections = prev.sections.map((section) => {
+          if (section.id !== sectionId) return section;
+          return {
+            ...section,
+            components: section.components.map((c) => (c.id === componentId ? updater(c) : c)),
+          };
+        });
+        return PageSchema.parse({ ...prev, sections: nextSections });
+      });
+    },
+    [updatePage]
   );
 
   const addSectionWithComponent = useCallback(
@@ -513,7 +589,15 @@ export function App() {
                   {page.sections.map((section) => (
                     <div key={section.id} className="stack" style={{ gap: 12 }}>
                       {section.components.map((component) => (
-                        <PreviewComponent key={component.id} component={component} page={page} projectId={projectId} />
+                        <PreviewComponent
+                          key={component.id}
+                          component={component}
+                          page={page}
+                          projectId={projectId}
+                          isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
+                          onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
+                          onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
+                        />
                       ))}
                     </div>
                   ))}
@@ -620,8 +704,16 @@ export function App() {
   );
 }
 
-function PreviewComponent(props: { component: Component; page: Page; projectId: string }) {
-  const { component, page, projectId } = props;
+function PreviewComponent(props: {
+  component: Component;
+  page: Page;
+  projectId: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onUpdate: (next: Component) => void;
+}) {
+  const { component, page, projectId, isSelected, onSelect, onUpdate } = props;
+  const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
   if (component.type === "hero") {
     const bgAsset =
       component.backgroundImageAssetId ? page.assets.find((a) => a.type === "image" && a.id === component.backgroundImageAssetId) : null;
@@ -640,41 +732,76 @@ function PreviewComponent(props: { component: Component; page: Page; projectId: 
           }
         : undefined;
     return (
-      <div className="hero" style={heroStyle}>
-        <h1>{component.headline}</h1>
-        <p>{component.subheadline}</p>
-        <a className="cta" href={component.primaryCtaHref}>
-          {component.primaryCtaText}
-        </a>
+      <div
+        className={wrapperClass}
+        onClick={(e) => {
+          e.preventDefault();
+          onSelect();
+        }}
+      >
+        <div className="hero" style={heroStyle}>
+          <h1>{component.headline}</h1>
+          <p>{component.subheadline}</p>
+          <a className="cta" href={component.primaryCtaHref} onClick={(e) => e.preventDefault()}>
+            {component.primaryCtaText}
+          </a>
+        </div>
       </div>
     );
   }
 
   if (component.type === "rich_text") {
-    return <div className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />;
+    if (isSelected) {
+      return (
+        <div className={wrapperClass} onClick={() => onSelect()}>
+          <div
+            key={`${component.id}-edit`}
+            className="richText richTextEditable"
+            contentEditable
+            suppressContentEditableWarning
+            onClick={(e) => e.stopPropagation()}
+            onBlur={(e) => {
+              const raw = e.currentTarget.innerHTML;
+              const clean = sanitizeRichTextHtml(raw);
+              e.currentTarget.innerHTML = clean;
+              onUpdate({ ...component, html: clean });
+            }}
+            dangerouslySetInnerHTML={{ __html: component.html }}
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className={wrapperClass} onClick={() => onSelect()}>
+        <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
+      </div>
+    );
   }
 
   if (component.type === "contact_form") {
     return (
-      <div className="contactForm" id="contact">
-        <h3>{component.headline}</h3>
-        <form onSubmit={(e) => e.preventDefault()}>
-          <div className="field">
-            <label>Name</label>
-            <input />
-          </div>
-          <div className="field">
-            <label>Email</label>
-            <input />
-          </div>
-          <div className="field">
-            <label>Message</label>
-            <textarea rows={4} />
-          </div>
-          <button className="btn btnPrimary" type="submit">
-            {component.submitLabel}
-          </button>
-        </form>
+      <div className={wrapperClass} onClick={() => onSelect()}>
+        <div className="contactForm" id="contact">
+          <h3>{component.headline}</h3>
+          <form onSubmit={(e) => e.preventDefault()}>
+            <div className="field">
+              <label>Name</label>
+              <input />
+            </div>
+            <div className="field">
+              <label>Email</label>
+              <input />
+            </div>
+            <div className="field">
+              <label>Message</label>
+              <textarea rows={4} />
+            </div>
+            <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()}>
+              {component.submitLabel}
+            </button>
+          </form>
+        </div>
       </div>
     );
   }
@@ -683,9 +810,11 @@ function PreviewComponent(props: { component: Component; page: Page; projectId: 
     const asset = page.assets.find((a) => a.type === "image" && a.id === component.assetId);
     if (!asset || asset.type !== "image") return null;
     return (
-      <div className="imageBlock">
-        <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} />
-        {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
+      <div className={wrapperClass} onClick={() => onSelect()}>
+        <div className="imageBlock">
+          <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} />
+          {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
+        </div>
       </div>
     );
   }

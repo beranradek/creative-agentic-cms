@@ -175,6 +175,21 @@ body {
   box-sizing: border-box;
 }
 
+.previewItem {
+  border-radius: 16px;
+  outline: 2px solid transparent;
+  outline-offset: 4px;
+  cursor: pointer;
+}
+
+.previewItem:hover {
+  outline-color: rgba(124, 92, 255, 0.35);
+}
+
+.previewItemSelected {
+  outline-color: rgba(124, 92, 255, 0.85);
+}
+
 .hero {
   border-radius: 18px;
   padding: 32px;
@@ -217,6 +232,12 @@ body {
   background: rgba(0, 0, 0, 0.18);
 }
 
+.richTextEditable {
+  min-height: 120px;
+  outline: none;
+  cursor: text;
+}
+
 .imageBlock {
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -255,4 +276,3 @@ body {
 .contactForm button {
   justify-self: start;
 }
-
