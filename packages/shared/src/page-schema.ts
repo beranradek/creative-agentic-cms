@@ -59,6 +59,9 @@ export const ComponentSchema = z.discriminatedUnion("type", [
   ContactFormComponentSchema,
 ]);
 
+export const SECTION_MAX_WIDTHS = [720, 980, 1200] as const;
+const SectionMaxWidthSchema = z.union([z.literal(720), z.literal(980), z.literal(1200)]).nullable().default(null);
+
 export const SectionSchema = z.object({
   id: SectionIdSchema,
   label: z.string().default("Section"),
@@ -70,7 +73,7 @@ export const SectionSchema = z.object({
         .nullable()
         .default(null),
       padding: z.number().int().min(0).max(96).nullable().default(null),
-      maxWidth: z.number().int().positive().nullable().default(null),
+      maxWidth: SectionMaxWidthSchema,
     })
     .default({}),
   components: z.array(ComponentSchema).default([]),

@@ -3,12 +3,18 @@ import { expect, test } from "@playwright/test";
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Gd0sAAAAASUVORK5CYII=";
 
+async function loadProject(page: import("@playwright/test").Page, projectId: string) {
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+  await expect(page.getByTestId("loaded-project")).toHaveText(`loaded: ${projectId}`);
+  await expect(page.getByTestId("load-state")).toHaveText("ready");
+}
+
 test("editor can add content, upload image, save and reload", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
@@ -19,21 +25,20 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
     buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
   });
 
-  await expect(page.locator("img")).toHaveCount(1);
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
 
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
   await expect(page.locator("text=Design. Compose. Publish.")).toBeVisible();
-  await expect(page.locator("img")).toHaveCount(1);
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
 });
 
 test("sections can be reordered via drag and drop (Structure panel)", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_reorder_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
@@ -53,6 +58,7 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
+  await expect(page.getByTestId("preview-item")).toHaveCount(2);
   const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
     els.map((el) => el.getAttribute("data-component-type"))
   );
@@ -64,8 +70,7 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await page.goto("/");
 
   const projectId = `e2e_cross_section_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
@@ -89,8 +94,7 @@ test("components can be reordered via drag and drop in Preview (within a section
   await page.goto("/");
 
   const projectId = `e2e_preview_reorder_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
 
@@ -122,8 +126,7 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_inline_hero_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
 
@@ -144,8 +147,7 @@ test("section style (background + padding) persists", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_section_style_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
   await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
@@ -153,7 +155,9 @@ test("section style (background + padding) persists", async ({ page }) => {
   await page.getByTestId("section-bg").fill("#ff0000");
   await page.getByTestId("section-padding").evaluate((el, value) => {
     const input = el as HTMLInputElement;
-    input.value = value;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "24");
@@ -177,8 +181,7 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   await page.goto("/");
 
   const projectId = `e2e_toolbar_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
 
@@ -205,8 +208,7 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await page.goto("/");
 
   const projectId = `e2e_inline_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-text").click();
 
@@ -229,8 +231,7 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   await page.goto("/");
 
   const projectId = `e2e_img_replace_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("upload-image").setInputFiles({
     name: "tiny.png",
@@ -265,8 +266,7 @@ test("can capture a preview screenshot (server Playwright required)", async ({ p
 
   await page.goto("/");
   const projectId = `e2e_shot_${Date.now()}`;
-  await page.getByTestId("project-id").fill(projectId);
-  await page.getByTestId("project-load").click();
+  await loadProject(page, projectId);
 
   await page.getByTestId("add-hero").click();
   await page.getByTestId("capture-screenshot").click();

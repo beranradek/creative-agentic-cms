@@ -81,6 +81,12 @@ function truncate(text: string, maxChars: number): string {
   return trimmed.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
 }
 
+function safeLabel(label: string): string {
+  const cleaned = label.replace(/\s+/g, " ").trim();
+  const noBrackets = cleaned.replaceAll("[", "(").replaceAll("]", ")");
+  return truncate(noBrackets || "Section", 60);
+}
+
 function stripHtmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -114,7 +120,7 @@ function buildPageSnapshot(page: Page): string {
     if (section.style.padding !== null) styleParts.push(`pad=${section.style.padding}px`);
     if (section.style.maxWidth !== null) styleParts.push(`maxW=${section.style.maxWidth}px`);
     const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
-    lines.push(`- [${section.label}] (${section.id})${styleText}`);
+    lines.push(`- [${safeLabel(section.label)}] (${section.id})${styleText}`);
     for (const c of section.components) {
       lines.push("  " + describeComponent(c, assetsById));
     }

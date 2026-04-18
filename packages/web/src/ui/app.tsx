@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   AssetSchema,
   PageSchema,
+  SECTION_MAX_WIDTHS,
   type Component,
   type Page,
   type Section,
@@ -135,19 +136,46 @@ type DragPayload =
   | { kind: "section"; sectionId: string }
   | { kind: "component"; sectionId: string; componentId: string };
 
+let inMemoryDragPayload: DragPayload | null = null;
+
 function setDragPayload(e: React.DragEvent, payload: DragPayload) {
+  inMemoryDragPayload = payload;
   e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData("application/x-cac", JSON.stringify(payload));
+  const raw = JSON.stringify(payload);
+  // Some browsers / automation harnesses only preserve `text/plain` during HTML5 DnD.
+  e.dataTransfer.setData("application/x-cac", raw);
+  e.dataTransfer.setData("text/plain", raw);
+}
+
+function clearDragPayload() {
+  inMemoryDragPayload = null;
 }
 
 function getDragPayload(e: React.DragEvent): DragPayload | null {
-  try {
-    const raw = e.dataTransfer.getData("application/x-cac");
-    if (!raw) return null;
-    return JSON.parse(raw) as DragPayload;
-  } catch {
-    return null;
+  const candidates = [e.dataTransfer.getData("application/x-cac"), e.dataTransfer.getData("text/plain")].filter(
+    (v) => v && v.trim().length
+  );
+  for (const raw of candidates) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") continue;
+      const kind = (parsed as { kind?: unknown }).kind;
+      if (kind === "section") {
+        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
+        if (typeof sectionId === "string" && sectionId.length) return { kind: "section", sectionId };
+      }
+      if (kind === "component") {
+        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
+        const componentId = (parsed as { componentId?: unknown }).componentId;
+        if (typeof sectionId === "string" && sectionId.length && typeof componentId === "string" && componentId.length) {
+          return { kind: "component", sectionId, componentId };
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
+  return inMemoryDragPayload;
 }
 
 async function apiGetPage(projectId: string): Promise<Page> {
@@ -220,7 +248,12 @@ async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: n
 async function downscaleImageFile(file: File, maxDimensionPx: number): Promise<File> {
   if (!Number.isFinite(maxDimensionPx) || maxDimensionPx <= 0) return file;
 
-  const bitmap = await createImageBitmap(file);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
   const maxDim = Math.max(bitmap.width, bitmap.height);
   if (maxDim <= maxDimensionPx) return file;
 
@@ -295,6 +328,7 @@ async function apiListProjects(): Promise<string[]> {
 
 export function App() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
+  const [loadedProjectId, setLoadedProjectId] = useState(DEFAULT_PROJECT_ID);
   const [state, setState] = useState<LoadState>({ kind: "idle" });
   const [projects, setProjects] = useState<string[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -313,6 +347,8 @@ export function App() {
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const page = state.kind === "ready" ? state.page : null;
+  const canEdit = state.kind === "ready" && loadedProjectId === projectId;
+  const activeProjectId = loadedProjectId;
 
   const imageAssets = useMemo(() => {
     if (!page) return [];
@@ -349,6 +385,7 @@ export function App() {
     try {
       const next = await apiGetPage(effectiveProjectId);
       setState({ kind: "ready", page: next });
+      setLoadedProjectId(effectiveProjectId);
       setSelected(null);
       void refreshProjects();
     } catch (error) {
@@ -431,7 +468,7 @@ export function App() {
     input.value = "";
 
     const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
-    const asset = await apiUploadImage(projectId, toUpload);
+    const asset = await apiUploadImage(activeProjectId, toUpload);
     updatePage((prev) => {
       const next = PageSchema.parse({
         ...prev,
@@ -451,11 +488,11 @@ export function App() {
   const uploadImageAssetOnly = useCallback(
     async (file: File) => {
       const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
-      const asset = await apiUploadImage(projectId, toUpload);
+      const asset = await apiUploadImage(activeProjectId, toUpload);
       updatePage((prev) => PageSchema.parse({ ...prev, assets: [...prev.assets, asset] }));
       return asset;
     },
-    [maxUploadPx, optimizeUploads, projectId, updatePage]
+    [activeProjectId, maxUploadPx, optimizeUploads, updatePage]
   );
 
   const removeSection = useCallback(
@@ -477,42 +514,42 @@ export function App() {
     try {
       let latestScreenshotUrl: string | undefined;
       try {
-        const shot = await apiCaptureScreenshot(projectId, { width: 1024, height: 768, fullPage: false });
+        const shot = await apiCaptureScreenshot(activeProjectId, { width: 1024, height: 768, fullPage: false });
         latestScreenshotUrl = shot.screenshotUrl;
         setScreenshotUrl(shot.screenshotUrl);
       } catch {
         // Best-effort: continue without screenshot (server might not have Playwright installed).
       }
 
-      const result = await apiAgentChat(projectId, trimmed, latestScreenshotUrl);
+      const result = await apiAgentChat(activeProjectId, trimmed, latestScreenshotUrl);
       setAgentReply(result.assistantMessage);
       setState({ kind: "ready", page: result.page });
       setSelected(null);
     } finally {
       setIsAgentRunning(false);
     }
-  }, [agentText, page, projectId]);
+  }, [activeProjectId, agentText, page]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
     setIsExporting(true);
     try {
-      const result = await apiExport(projectId);
+      const result = await apiExport(activeProjectId);
       setExportInfo(result.outputDir);
     } finally {
       setIsExporting(false);
     }
-  }, [page, projectId]);
+  }, [activeProjectId, page]);
 
   const captureScreenshot = useCallback(async () => {
     setIsCapturingScreenshot(true);
     try {
-      const result = await apiCaptureScreenshot(projectId, { width: 1200, height: 720, fullPage: true });
+      const result = await apiCaptureScreenshot(activeProjectId, { width: 1200, height: 720, fullPage: true });
       setScreenshotUrl(result.screenshotUrl);
     } finally {
       setIsCapturingScreenshot(false);
     }
-  }, [projectId]);
+  }, [activeProjectId]);
 
   return (
     <div className="shell">
@@ -537,6 +574,12 @@ export function App() {
               </div>
               <div className="muted">
                 Storage is local (filesystem). Current project: <b>{projectId}</b>
+                <span className="badge" data-testid="load-state" style={{ marginLeft: 8 }}>
+                  {state.kind}
+                </span>
+                <span className="badge" data-testid="loaded-project" style={{ marginLeft: 8, opacity: 0.85 }}>
+                  loaded: {loadedProjectId}
+                </span>
               </div>
               <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
                 <div className="muted">Projects</div>
@@ -569,16 +612,23 @@ export function App() {
               className="btn btnPrimary"
               data-testid="add-hero"
               onClick={() => addSectionWithComponent("hero", "Hero")}
+              disabled={!canEdit}
             >
               Add Hero
             </button>
-            <button className="btn" data-testid="add-text" onClick={() => addSectionWithComponent("rich_text", "Text")}>
+            <button
+              className="btn"
+              data-testid="add-text"
+              onClick={() => addSectionWithComponent("rich_text", "Text")}
+              disabled={!canEdit}
+            >
               Add Text
             </button>
             <button
               className="btn"
               data-testid="add-contact"
               onClick={() => addSectionWithComponent("contact_form", "Contact")}
+              disabled={!canEdit}
             >
               Add Contact Form
             </button>
@@ -608,6 +658,7 @@ export function App() {
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 data-testid="upload-image"
+                disabled={!canEdit}
                 onChange={() => void uploadImage()}
               />
               <div className="muted">Uploads to <code>projects/&lt;projectId&gt;/assets</code> and inserts an image block.</div>
@@ -621,7 +672,7 @@ export function App() {
                     {imageAssets.map((asset) => (
                       <div key={asset.id} className="row" style={{ alignItems: "flex-start" }}>
                         <img
-                          src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`}
+                          src={`/projects/${encodeURIComponent(activeProjectId)}/assets/${asset.filename}`}
                           alt={asset.alt}
                           style={{
                             width: 44,
@@ -635,6 +686,7 @@ export function App() {
                           <label>Alt</label>
                           <input
                             value={asset.alt}
+                            disabled={!canEdit}
                             onChange={(e) =>
                               updatePage((prev) =>
                                 PageSchema.parse({
@@ -666,7 +718,7 @@ export function App() {
                   className="btn btnPrimary"
                   data-testid="save-page"
                   onClick={() => void save()}
-                  disabled={!page || isSaving}
+                  disabled={!canEdit || isSaving}
                 >
                   {isSaving ? "Saving..." : "Save page.json"}
                 </button>
@@ -758,30 +810,31 @@ export function App() {
               {page ? (
                 <div className="stack" style={{ gap: 18 }}>
                   {page.sections.map((section) => (
-                    <div
-                      key={section.id}
-                      className="previewSection"
-                      data-testid="preview-section"
-                      data-section-id={section.id}
-                      style={{
-                        background: section.style.background ?? undefined,
-                        padding: section.style.padding !== null ? section.style.padding : undefined,
-                        maxWidth: section.style.maxWidth ?? undefined,
-                        margin: section.style.maxWidth ? "0 auto" : undefined,
-                      }}
-                    >
-                      <div className="stack" style={{ gap: 12 }}>
+                  <div
+                    key={section.id}
+                    className="previewSection"
+                    data-testid="preview-section"
+                    data-section-id={section.id}
+                    style={{
+                      background: section.style.background ?? undefined,
+                      padding: section.style.padding !== null ? section.style.padding : undefined,
+                      maxWidth: section.style.maxWidth ?? 980,
+                    }}
+                  >
+                    <div className="stack" style={{ gap: 12 }}>
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
                           sectionId={section.id}
                           component={component}
                           page={page}
-                          projectId={projectId}
+                          projectId={activeProjectId}
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
+                          canEdit={canEdit}
                           onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
                           onDelete={() => {
+                            if (!canEdit) return;
                             updatePage((prev) => {
                               const nextSections = prev.sections.map((s) =>
                                 s.id === section.id ? { ...s, components: s.components.filter((c) => c.id !== component.id) } : s
@@ -791,6 +844,7 @@ export function App() {
                             setSelected((prevSel) => (prevSel?.componentId === component.id ? null : prevSel));
                           }}
                           onDuplicate={() => {
+                            if (!canEdit) return;
                             updatePage((prev) => {
                               const nextSections = prev.sections.map((s) => {
                                 if (s.id !== section.id) return s;
@@ -806,6 +860,7 @@ export function App() {
                           }}
                           onUploadImageAssetOnly={uploadImageAssetOnly}
                           onMoveHere={(fromSectionId, fromComponentId) => {
+                            if (!canEdit) return;
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.id === fromSectionId);
                               const toSection = prev.sections.find((s) => s.id === section.id);
@@ -846,14 +901,15 @@ export function App() {
                           }}
                         />
                       ))}
-                      <PreviewDropZone
-                        key={`${section.id}-dropzone`}
-                        sectionId={section.id}
-                        onMoveToEnd={(fromSectionId, fromComponentId) => {
-                          updatePage((prev) => {
-                            const fromSection = prev.sections.find((s) => s.id === fromSectionId);
-                            const toSection = prev.sections.find((s) => s.id === section.id);
-                            if (!fromSection || !toSection) return prev;
+                        <PreviewDropZone
+                          key={`${section.id}-dropzone`}
+                          sectionId={section.id}
+                          onMoveToEnd={(fromSectionId, fromComponentId) => {
+                            if (!canEdit) return;
+                            updatePage((prev) => {
+                              const fromSection = prev.sections.find((s) => s.id === fromSectionId);
+                              const toSection = prev.sections.find((s) => s.id === section.id);
+                              if (!fromSection || !toSection) return prev;
                             const moving = fromSection.components.find((c) => c.id === fromComponentId);
                             if (!moving) return prev;
 
@@ -908,6 +964,7 @@ export function App() {
                     <label>Title</label>
                     <input
                       value={page.metadata.title}
+                      disabled={!canEdit}
                       onChange={(e) =>
                         updatePage((prev) =>
                           PageSchema.parse({ ...prev, metadata: { ...prev.metadata, title: e.target.value } })
@@ -920,6 +977,7 @@ export function App() {
                     <textarea
                       rows={3}
                       value={page.metadata.description}
+                      disabled={!canEdit}
                       onChange={(e) =>
                         updatePage((prev) =>
                           PageSchema.parse({ ...prev, metadata: { ...prev.metadata, description: e.target.value } })
@@ -937,9 +995,14 @@ export function App() {
                     className="card"
                     data-testid="structure-section-card"
                     data-section-id={section.id}
-                    draggable
-                    onDragStart={(e) => setDragPayload(e, { kind: "section", sectionId: section.id })}
+                    draggable={canEdit}
+                    onDragStart={(e) => {
+                      if (!canEdit) return;
+                      setDragPayload(e, { kind: "section", sectionId: section.id });
+                    }}
+                    onDragEnd={() => clearDragPayload()}
                     onDragOver={(e) => {
+                      if (!canEdit) return;
                       const payload = getDragPayload(e);
                       if (!payload || payload.kind !== "section") return;
                       e.preventDefault();
@@ -947,9 +1010,11 @@ export function App() {
                     }}
                     onDragLeave={() => setDragOverSectionId((prev) => (prev === section.id ? null : prev))}
                     onDrop={(e) => {
+                      if (!canEdit) return;
                       const payload = getDragPayload(e);
                       if (!payload || payload.kind !== "section") return;
                       e.preventDefault();
+                      clearDragPayload();
                       setDragOverSectionId(null);
                       if (payload.sectionId === section.id) return;
                       updatePage((prev) => {
@@ -967,17 +1032,17 @@ export function App() {
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="cardTitle">{section.label}</div>
                       <div className="row">
-                        <button className="btn" onClick={() => moveSection(section.id, -1)} disabled={idx === 0}>
+                        <button className="btn" onClick={() => moveSection(section.id, -1)} disabled={!canEdit || idx === 0}>
                           ↑
                         </button>
                         <button
                           className="btn"
                           onClick={() => moveSection(section.id, 1)}
-                          disabled={idx === page.sections.length - 1}
+                          disabled={!canEdit || idx === page.sections.length - 1}
                         >
                           ↓
                         </button>
-                        <button className="btn btnDanger" onClick={() => removeSection(section.id)}>
+                        <button className="btn btnDanger" onClick={() => removeSection(section.id)} disabled={!canEdit}>
                           Remove
                         </button>
                         <button className="btn" onClick={() => setSelected({ sectionId: section.id })}>
@@ -996,6 +1061,7 @@ export function App() {
                   component={selectedComponent}
                   imageAssets={imageAssets}
                   onUploadImageAssetOnly={uploadImageAssetOnly}
+                  canEdit={canEdit}
                   onSelect={(componentId) => setSelected({ sectionId: selectedSection.id, componentId })}
                   onUpdate={(nextSection) =>
                     updatePage((prev) =>
@@ -1025,6 +1091,7 @@ function PreviewComponent(props: {
   page: Page;
   projectId: string;
   isSelected: boolean;
+  canEdit: boolean;
   onSelect: () => void;
   onUpdate: (next: Component) => void;
   onDelete: () => void;
@@ -1032,22 +1099,29 @@ function PreviewComponent(props: {
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
 }) {
-  const { sectionId, component, page, projectId, isSelected, onSelect, onUpdate, onDelete, onDuplicate, onUploadImageAssetOnly, onMoveHere } =
+  const { sectionId, component, page, projectId, isSelected, canEdit, onSelect, onUpdate, onDelete, onDuplicate, onUploadImageAssetOnly, onMoveHere } =
     props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
 
   const dragProps = {
-    draggable: !isSelected,
-    onDragStart: (e: React.DragEvent) => setDragPayload(e, { kind: "component", sectionId, componentId: component.id }),
+    draggable: canEdit && !isSelected,
+    onDragStart: (e: React.DragEvent) => {
+      if (!canEdit) return;
+      setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
+    },
+    onDragEnd: () => clearDragPayload(),
     onDragOver: (e: React.DragEvent) => {
+      if (!canEdit) return;
       const payload = getDragPayload(e);
       if (!payload || payload.kind !== "component") return;
       e.preventDefault();
     },
     onDrop: (e: React.DragEvent) => {
+      if (!canEdit) return;
       const payload = getDragPayload(e);
       if (!payload || payload.kind !== "component") return;
       e.preventDefault();
+      clearDragPayload();
       if (payload.sectionId === sectionId && payload.componentId === component.id) return;
       onMoveHere(payload.sectionId, payload.componentId);
     },
@@ -1083,21 +1157,21 @@ function PreviewComponent(props: {
       >
         {isSelected ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
             </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
               Delete
             </button>
           </div>
         ) : null}
         <div className="hero" style={heroStyle}>
           <h1
-            contentEditable={isSelected}
+            contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
             onClick={(e) => (isSelected ? e.stopPropagation() : null)}
             onBlur={(e) => {
-              if (!isSelected) return;
+              if (!isSelected || !canEdit) return;
               const next = sanitizeInlineText(e.currentTarget.innerText);
               if (!next) return;
               onUpdate({ ...component, headline: next });
@@ -1106,11 +1180,11 @@ function PreviewComponent(props: {
             {component.headline}
           </h1>
           <p
-            contentEditable={isSelected}
+            contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
             onClick={(e) => (isSelected ? e.stopPropagation() : null)}
             onBlur={(e) => {
-              if (!isSelected) return;
+              if (!isSelected || !canEdit) return;
               const next = sanitizeInlineText(e.currentTarget.innerText);
               if (!next) return;
               onUpdate({ ...component, subheadline: next });
@@ -1127,7 +1201,7 @@ function PreviewComponent(props: {
   }
 
   if (component.type === "rich_text") {
-    if (isSelected) {
+    if (isSelected && canEdit) {
       return (
         <div
           className={wrapperClass}
@@ -1189,21 +1263,21 @@ function PreviewComponent(props: {
       >
         {isSelected ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
             </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
               Delete
             </button>
           </div>
         ) : null}
         <div className="contactForm" id="contact">
           <h3
-            contentEditable={isSelected}
+            contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
             onClick={(e) => (isSelected ? e.stopPropagation() : null)}
             onBlur={(e) => {
-              if (!isSelected) return;
+              if (!isSelected || !canEdit) return;
               const next = sanitizeInlineText(e.currentTarget.innerText);
               if (!next) return;
               onUpdate({ ...component, headline: next });
@@ -1226,11 +1300,11 @@ function PreviewComponent(props: {
             </div>
             <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()}>
               <span
-                contentEditable={isSelected}
+                contentEditable={isSelected && canEdit}
                 suppressContentEditableWarning
                 onClick={(e) => (isSelected ? e.stopPropagation() : null)}
                 onBlur={(e) => {
-                  if (!isSelected) return;
+                  if (!isSelected || !canEdit) return;
                   const next = sanitizeInlineText(e.currentTarget.innerText);
                   if (!next) return;
                   onUpdate({ ...component, submitLabel: next });
@@ -1259,7 +1333,7 @@ function PreviewComponent(props: {
       >
         {isSelected ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <label className="btn" data-testid="preview-image-replace">
+            <label className="btn" data-testid="preview-image-replace" style={!canEdit ? { opacity: 0.6, pointerEvents: "none" } : undefined}>
               Replace
               <input
                 type="file"
@@ -1275,10 +1349,10 @@ function PreviewComponent(props: {
                 }}
               />
             </label>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
             </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
               Delete
             </button>
           </div>
@@ -1318,6 +1392,7 @@ function PreviewDropZone(props: {
         const payload = getDragPayload(e);
         if (!payload || payload.kind !== "component") return;
         e.preventDefault();
+        clearDragPayload();
         setIsOver(false);
         onMoveToEnd(payload.sectionId, payload.componentId);
       }}
@@ -1332,10 +1407,11 @@ function Inspector(props: {
   component: Component | null;
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
+  canEdit: boolean;
   onSelect: (componentId: string) => void;
   onUpdate: (next: Section) => void;
 }) {
-  const { section, component, imageAssets, onUploadImageAssetOnly, onSelect, onUpdate } = props;
+  const { section, component, imageAssets, onUploadImageAssetOnly, canEdit, onSelect, onUpdate } = props;
   const [selectedImageAssetId, setSelectedImageAssetId] = useState<string>(imageAssets[0]?.id ?? "");
   const [dragOverComponentId, setDragOverComponentId] = useState<string | null>(null);
 
@@ -1352,26 +1428,29 @@ function Inspector(props: {
 
   const add = useCallback(
     (type: Component["type"]) => {
+      if (!canEdit) return;
       const next: Section = {
         ...section,
         components: [...section.components, createComponent(type)],
       };
       onUpdate(next);
     },
-    [onUpdate, section]
+    [canEdit, onUpdate, section]
   );
 
   const addImage = useCallback(() => {
+    if (!canEdit) return;
     if (!selectedImageAssetId) return;
     const next: Section = {
       ...section,
       components: [...section.components, createImageComponent(selectedImageAssetId)],
     };
     onUpdate(next);
-  }, [onUpdate, section, selectedImageAssetId]);
+  }, [canEdit, onUpdate, section, selectedImageAssetId]);
 
   const moveComponent = useCallback(
     (componentId: string, delta: -1 | 1) => {
+      if (!canEdit) return;
       const index = section.components.findIndex((c) => c.id === componentId);
       if (index < 0) return;
       const next: Section = {
@@ -1380,18 +1459,19 @@ function Inspector(props: {
       };
       onUpdate(next);
     },
-    [onUpdate, section]
+    [canEdit, onUpdate, section]
   );
 
   const removeComponent = useCallback(
     (componentId: string) => {
+      if (!canEdit) return;
       const next: Section = {
         ...section,
         components: section.components.filter((c) => c.id !== componentId),
       };
       onUpdate(next);
     },
-    [onUpdate, section]
+    [canEdit, onUpdate, section]
   );
 
   return (
@@ -1410,6 +1490,7 @@ function Inspector(props: {
                   data-testid="section-bg"
                   type="color"
                   value={section.style.background ?? "#000000"}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     onUpdate({
                       ...section,
@@ -1417,7 +1498,11 @@ function Inspector(props: {
                     })
                   }
                 />
-                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, background: null } })}>
+                <button
+                  className="btn"
+                  onClick={() => onUpdate({ ...section, style: { ...section.style, background: null } })}
+                  disabled={!canEdit}
+                >
                   Clear
                 </button>
               </div>
@@ -1432,6 +1517,7 @@ function Inspector(props: {
                   min={0}
                   max={96}
                   value={section.style.padding ?? 0}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     onUpdate({
                       ...section,
@@ -1441,7 +1527,7 @@ function Inspector(props: {
                   style={{ flex: 1 }}
                 />
                 <span className="badge">{section.style.padding ?? 0}px</span>
-                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, padding: null } })}>
+                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, padding: null } })} disabled={!canEdit}>
                   Auto
                 </button>
               </div>
@@ -1453,19 +1539,31 @@ function Inspector(props: {
                 <select
                   data-testid="section-maxwidth"
                   value={section.style.maxWidth ?? ""}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     onUpdate({
                       ...section,
-                      style: { ...section.style, maxWidth: e.target.value ? Number(e.target.value) : null },
+                      style: {
+                        ...section.style,
+                        maxWidth: (() => {
+                          if (e.target.value === "") return null;
+                          const n = Number(e.target.value);
+                          return SECTION_MAX_WIDTHS.includes(n as (typeof SECTION_MAX_WIDTHS)[number])
+                            ? (n as (typeof SECTION_MAX_WIDTHS)[number])
+                            : null;
+                        })(),
+                      },
                     })
                   }
                 >
                   <option value="">(auto)</option>
-                  <option value="720">720</option>
-                  <option value="980">980</option>
-                  <option value="1200">1200</option>
+                  {SECTION_MAX_WIDTHS.map((w) => (
+                    <option key={w} value={String(w)}>
+                      {w}
+                    </option>
+                  ))}
                 </select>
-                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, maxWidth: null } })}>
+                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, maxWidth: null } })} disabled={!canEdit}>
                   Auto
                 </button>
               </div>
@@ -1473,13 +1571,13 @@ function Inspector(props: {
           </div>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => add("hero")}>
+          <button className="btn" onClick={() => add("hero")} disabled={!canEdit}>
             + Hero
           </button>
-          <button className="btn" onClick={() => add("rich_text")}>
+          <button className="btn" onClick={() => add("rich_text")} disabled={!canEdit}>
             + Text
           </button>
-          <button className="btn" onClick={() => add("contact_form")}>
+          <button className="btn" onClick={() => add("contact_form")} disabled={!canEdit}>
             + Form
           </button>
         </div>
@@ -1487,7 +1585,7 @@ function Inspector(props: {
         <div className="row" style={{ alignItems: "flex-end" }}>
           <div className="field" style={{ flex: 1 }}>
             <label>Image asset</label>
-            <select value={selectedImageAssetId} onChange={(e) => setSelectedImageAssetId(e.target.value)}>
+            <select value={selectedImageAssetId} onChange={(e) => setSelectedImageAssetId(e.target.value)} disabled={!canEdit}>
               <option value="">(none)</option>
               {imageAssets.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -1496,7 +1594,7 @@ function Inspector(props: {
               ))}
             </select>
           </div>
-          <button className="btn" onClick={addImage} disabled={!selectedImageAssetId}>
+          <button className="btn" onClick={addImage} disabled={!canEdit || !selectedImageAssetId}>
             + Image
           </button>
         </div>
@@ -1515,6 +1613,7 @@ function Inspector(props: {
                   : { justifyContent: "space-between" }
               }
               onDragOver={(e) => {
+                if (!canEdit) return;
                 const payload = getDragPayload(e);
                 if (!payload || payload.kind !== "component") return;
                 if (payload.sectionId !== section.id) return;
@@ -1523,10 +1622,12 @@ function Inspector(props: {
               }}
               onDragLeave={() => setDragOverComponentId((prev) => (prev === c.id ? null : prev))}
               onDrop={(e) => {
+                if (!canEdit) return;
                 const payload = getDragPayload(e);
                 if (!payload || payload.kind !== "component") return;
                 if (payload.sectionId !== section.id) return;
                 e.preventDefault();
+                clearDragPayload();
                 setDragOverComponentId(null);
                 if (payload.componentId === c.id) return;
                 const fromIndex = section.components.findIndex((x) => x.id === payload.componentId);
@@ -1540,9 +1641,13 @@ function Inspector(props: {
                   className="dragHandle"
                   data-testid="inspector-component-drag-handle"
                   data-component-id={c.id}
-                  draggable
+                  draggable={canEdit}
                   title="Drag to reorder"
-                  onDragStart={(e) => setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id })}
+                  onDragStart={(e) => {
+                    if (!canEdit) return;
+                    setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
+                  }}
+                  onDragEnd={() => clearDragPayload()}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮
@@ -1552,17 +1657,17 @@ function Inspector(props: {
                 </button>
               </div>
               <div className="row">
-                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={idx === 0}>
+                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={!canEdit || idx === 0}>
                   ↑
                 </button>
                 <button
                   className="btn"
                   onClick={() => moveComponent(c.id, 1)}
-                  disabled={idx === section.components.length - 1}
+                  disabled={!canEdit || idx === section.components.length - 1}
                 >
                   ↓
                 </button>
-                <button className="btn btnDanger" onClick={() => removeComponent(c.id)}>
+                <button className="btn btnDanger" onClick={() => removeComponent(c.id)} disabled={!canEdit}>
                   Remove
                 </button>
                 <span className="badge">{c.id.slice(0, 8)}</span>
@@ -1576,6 +1681,7 @@ function Inspector(props: {
             component={component}
             imageAssets={imageAssets}
             onUploadImageAssetOnly={onUploadImageAssetOnly}
+            canEdit={canEdit}
             onUpdate={(next) => updateComponent(section, next, onUpdate)}
           />
         ) : null}
@@ -1596,21 +1702,27 @@ function ComponentFields(props: {
   component: Component;
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
+  canEdit: boolean;
   onUpdate: (next: Component) => void;
 }) {
-  const { component, imageAssets, onUploadImageAssetOnly, onUpdate } = props;
+  const { component, imageAssets, onUploadImageAssetOnly, canEdit, onUpdate } = props;
 
   if (component.type === "hero") {
     return (
       <div className="stack">
         <div className="field">
           <label>Headline</label>
-          <input value={component.headline} onChange={(e) => onUpdate({ ...component, headline: e.target.value })} />
+          <input
+            value={component.headline}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, headline: e.target.value })}
+          />
         </div>
         <div className="field">
           <label>Background image</label>
           <select
             value={component.backgroundImageAssetId ?? ""}
+            disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, backgroundImageAssetId: e.target.value ? e.target.value : null })}
           >
             <option value="">(none)</option>
@@ -1626,17 +1738,26 @@ function ComponentFields(props: {
           <textarea
             rows={3}
             value={component.subheadline}
+            disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, subheadline: e.target.value })}
           />
         </div>
         <div className="row">
           <div className="field" style={{ flex: 1 }}>
             <label>CTA text</label>
-            <input value={component.primaryCtaText} onChange={(e) => onUpdate({ ...component, primaryCtaText: e.target.value })} />
+            <input
+              value={component.primaryCtaText}
+              disabled={!canEdit}
+              onChange={(e) => onUpdate({ ...component, primaryCtaText: e.target.value })}
+            />
           </div>
           <div className="field" style={{ flex: 1 }}>
             <label>CTA href</label>
-            <input value={component.primaryCtaHref} onChange={(e) => onUpdate({ ...component, primaryCtaHref: e.target.value })} />
+            <input
+              value={component.primaryCtaHref}
+              disabled={!canEdit}
+              onChange={(e) => onUpdate({ ...component, primaryCtaHref: e.target.value })}
+            />
           </div>
         </div>
       </div>
@@ -1647,7 +1768,12 @@ function ComponentFields(props: {
     return (
       <div className="field">
         <label>HTML</label>
-        <textarea rows={8} value={component.html} onChange={(e) => onUpdate({ ...component, html: e.target.value })} />
+        <textarea
+          rows={8}
+          value={component.html}
+          disabled={!canEdit}
+          onChange={(e) => onUpdate({ ...component, html: e.target.value })}
+        />
         <div className="muted">MVP: edit raw HTML. Next: true inline editing.</div>
       </div>
     );
@@ -1658,11 +1784,19 @@ function ComponentFields(props: {
       <div className="stack">
         <div className="field">
           <label>Headline</label>
-          <input value={component.headline} onChange={(e) => onUpdate({ ...component, headline: e.target.value })} />
+          <input
+            value={component.headline}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, headline: e.target.value })}
+          />
         </div>
         <div className="field">
           <label>Submit label</label>
-          <input value={component.submitLabel} onChange={(e) => onUpdate({ ...component, submitLabel: e.target.value })} />
+          <input
+            value={component.submitLabel}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, submitLabel: e.target.value })}
+          />
         </div>
       </div>
     );
@@ -1673,7 +1807,11 @@ function ComponentFields(props: {
       <div className="stack">
         <div className="field">
           <label>Asset</label>
-          <select value={component.assetId} onChange={(e) => onUpdate({ ...component, assetId: e.target.value })}>
+          <select
+            value={component.assetId}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, assetId: e.target.value })}
+          >
             {imageAssets.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.filename}
@@ -1689,6 +1827,7 @@ function ComponentFields(props: {
             type="file"
             accept="image/png,image/jpeg,image/webp"
             data-testid="image-replace-upload"
+            disabled={!canEdit}
             onChange={async (e) => {
               const file = e.currentTarget.files?.[0];
               e.currentTarget.value = "";
@@ -1702,7 +1841,11 @@ function ComponentFields(props: {
 
         <div className="field">
           <label>Caption</label>
-          <input value={component.caption} onChange={(e) => onUpdate({ ...component, caption: e.target.value })} />
+          <input
+            value={component.caption}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, caption: e.target.value })}
+          />
           <div className="muted">Alt text is stored on the asset (MVP).</div>
         </div>
       </div>

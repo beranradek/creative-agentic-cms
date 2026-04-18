@@ -91,8 +91,8 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     :root { color-scheme: light; --bg:#0b0d12; --text:#e8eefc; --muted:#a7b3d6; --line:rgba(255,255,255,0.12); --accent:#7c5cff; }
     html,body { height:100%; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 15% 10%, rgba(124,92,255,0.35), transparent 55%), radial-gradient(900px 500px at 70% 20%, rgba(34,211,238,0.22), transparent 55%), var(--bg); color: var(--text); }
-    .container { max-width: 980px; margin: 0 auto; padding: 32px 16px; display:flex; flex-direction:column; gap: 18px; }
-    .section { display:flex; flex-direction:column; gap: 12px; }
+    .container { max-width: none; margin: 0 auto; padding: 32px 16px; display:flex; flex-direction:column; gap: 18px; }
+    .section { width: 100%; max-width: 980px; margin: 0 auto; display:flex; flex-direction:column; gap: 12px; }
     .hero { border-radius: 18px; padding: 32px; border: 1px solid var(--line); background: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), rgba(0,0,0,0.22); }
     .hero h1 { margin:0; font-size: 44px; line-height: 1.05; letter-spacing:-0.02em; }
     .hero p { margin: 12px 0 0 0; color: rgba(232,238,252,0.9); max-width: 60ch; line-height: 1.45; }
