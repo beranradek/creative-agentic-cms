@@ -8,6 +8,7 @@ import {
   type Page,
   type Section,
 } from "@cac/shared";
+import { isSttSupported, startStt, stopStt } from "./stt.js";
 
 type LoadState =
   | { kind: "idle" }
@@ -353,6 +354,18 @@ export function App() {
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
   const [agentText, setAgentText] = useState("");
+  const sttSupported = useMemo(() => isSttSupported(), []);
+  const [sttLang, setSttLang] = useState(() => {
+    const lang = (globalThis.navigator?.language || "en-US").trim();
+    if (lang.toLowerCase().startsWith("cs")) return "cs-CZ";
+    return lang || "en-US";
+  });
+  const [sttMode, setSttMode] = useState<"append" | "replace">("append");
+  const [isSttActive, setIsSttActive] = useState(false);
+  const [sttError, setSttError] = useState<string | null>(null);
+  const [sttInterim, setSttInterim] = useState("");
+  const sttBaseRef = useRef<string>("");
+  const sttFinalRef = useRef<string>("");
   const [agentReply, setAgentReply] = useState<string | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
@@ -538,10 +551,74 @@ export function App() {
     [updatePage]
   );
 
+  const appendTranscript = useCallback((prev: string, next: string) => {
+    const cleaned = next.replace(/\s+/g, " ").trim();
+    if (!cleaned) return prev;
+    const base = prev.trimEnd();
+    if (!base) return cleaned;
+    if (/[({[\n\r\t ]$/.test(base)) return `${base}${cleaned}`;
+    return `${base} ${cleaned}`;
+  }, []);
+
+  const stopAgentStt = useCallback(() => {
+    stopStt();
+    setIsSttActive(false);
+    setSttInterim("");
+  }, []);
+
+  const toggleAgentStt = useCallback(() => {
+    if (!sttSupported) return;
+    setSttError(null);
+
+    if (isSttActive) {
+      stopAgentStt();
+      setAgentText(appendTranscript(sttBaseRef.current, sttFinalRef.current));
+      sttFinalRef.current = "";
+      return;
+    }
+
+    sttBaseRef.current = sttMode === "replace" ? "" : agentText.trim();
+    sttFinalRef.current = "";
+    setSttInterim("");
+    setAgentText(sttBaseRef.current);
+
+    const ok = startStt(sttLang, {
+      onStart: () => setIsSttActive(true),
+      onEnd: () => {
+        setIsSttActive(false);
+        setSttInterim("");
+        setAgentText(appendTranscript(sttBaseRef.current, sttFinalRef.current));
+        sttFinalRef.current = "";
+      },
+      onError: (error) => {
+        setSttError(error);
+        setIsSttActive(false);
+        setSttInterim("");
+      },
+      onTranscript: (text, isFinal) => {
+        if (isFinal) {
+          sttFinalRef.current = appendTranscript(sttFinalRef.current, text);
+          setSttInterim("");
+          setAgentText(appendTranscript(sttBaseRef.current, sttFinalRef.current));
+        } else {
+          const interim = text.replace(/\s+/g, " ").trim();
+          setSttInterim(interim);
+          setAgentText(appendTranscript(appendTranscript(sttBaseRef.current, sttFinalRef.current), interim));
+        }
+      },
+    });
+
+    if (!ok) {
+      setSttError("Speech recognition is not supported in this browser.");
+      setIsSttActive(false);
+    }
+  }, [agentText, appendTranscript, isSttActive, stopAgentStt, sttLang, sttMode, sttSupported]);
+
   const runAgent = useCallback(async () => {
     if (!page) return;
     const trimmed = agentText.trim();
     if (!trimmed) return;
+    if (isSttActive) stopAgentStt();
     setIsAgentRunning(true);
     try {
       let latestScreenshotUrl: string | undefined;
@@ -560,7 +637,7 @@ export function App() {
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentText, page]);
+  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
@@ -818,6 +895,36 @@ export function App() {
                   onChange={(e) => setAgentText(e.target.value)}
                   placeholder='Example: "Make the hero headline shorter and more specific to a sleep coaching business."'
                 />
+                <div className="row" style={{ marginTop: 8, alignItems: "flex-end", justifyContent: "space-between" }}>
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      className={isSttActive ? "btn btnPrimary" : "btn"}
+                      data-testid="agent-mic"
+                      disabled={!sttSupported || isAgentRunning}
+                      onClick={() => toggleAgentStt()}
+                      title={sttSupported ? "Speech-to-text" : "Speech-to-text is not supported in this browser"}
+                    >
+                      {isSttActive ? "Stop mic" : "Mic"}
+                    </button>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Lang</label>
+                      <input value={sttLang} onChange={(e) => setSttLang(e.target.value)} disabled={!sttSupported || isAgentRunning} />
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Mode</label>
+                      <select
+                        value={sttMode}
+                        onChange={(e) => setSttMode(e.target.value === "replace" ? "replace" : "append")}
+                        disabled={!sttSupported || isAgentRunning || isSttActive}
+                      >
+                        <option value="append">append</option>
+                        <option value="replace">replace</option>
+                      </select>
+                    </div>
+                    {sttInterim ? <span className="badge">listening…</span> : null}
+                  </div>
+                </div>
+                {sttError ? <div className="muted">Mic error: {sttError}</div> : null}
               </div>
               <div className="row">
                 <button
