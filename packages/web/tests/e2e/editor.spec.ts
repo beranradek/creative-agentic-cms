@@ -140,6 +140,39 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await expect(page.locator(".hero h1")).toContainText("Hello from inline hero");
 });
 
+test("section style (background + padding) persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_style_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+
+  await page.getByTestId("section-bg").fill("#ff0000");
+  await page.getByTestId("section-padding").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "24");
+
+  const section = page.getByTestId("preview-section").first();
+  const bg = await section.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toBe("rgb(255, 0, 0)");
+  const pad = await section.evaluate((el) => getComputedStyle(el).paddingTop);
+  expect(pad).toBe("24px");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  const bgAfter = await section.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bgAfter).toBe("rgb(255, 0, 0)");
+  const padAfter = await section.evaluate((el) => getComputedStyle(el).paddingTop);
+  expect(padAfter).toBe("24px");
+});
+
 test("can duplicate and delete a component from Preview toolbar", async ({ page }) => {
   await page.goto("/");
 

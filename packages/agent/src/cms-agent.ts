@@ -109,7 +109,12 @@ function buildPageSnapshot(page: Page): string {
 
   lines.push("Structure:");
   for (const section of page.sections) {
-    lines.push(`- [${section.label}] (${section.id})`);
+    const styleParts: string[] = [];
+    if (section.style.background) styleParts.push(`bg=${section.style.background}`);
+    if (section.style.padding !== null) styleParts.push(`pad=${section.style.padding}px`);
+    if (section.style.maxWidth !== null) styleParts.push(`maxW=${section.style.maxWidth}px`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    lines.push(`- [${section.label}] (${section.id})${styleText}`);
     for (const c of section.components) {
       lines.push("  " + describeComponent(c, assetsById));
     }

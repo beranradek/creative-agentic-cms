@@ -62,6 +62,17 @@ export const ComponentSchema = z.discriminatedUnion("type", [
 export const SectionSchema = z.object({
   id: SectionIdSchema,
   label: z.string().default("Section"),
+  style: z
+    .object({
+      background: z
+        .string()
+        .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+        .nullable()
+        .default(null),
+      padding: z.number().int().min(0).max(96).nullable().default(null),
+      maxWidth: z.number().int().positive().nullable().default(null),
+    })
+    .default({}),
   components: z.array(ComponentSchema).default([]),
 });
 

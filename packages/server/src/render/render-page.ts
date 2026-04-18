@@ -1,4 +1,4 @@
-import type { Page, Component, Asset } from "@cac/shared";
+import type { Page, Section, Component, Asset } from "@cac/shared";
 
 function escapeHtml(text: string): string {
   return text
@@ -20,16 +20,16 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
         ? ` style="background-image: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), linear-gradient(180deg, rgba(0,0,0,0.60), rgba(0,0,0,0.20)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;"`
         : "";
     return `
-      <section class="hero"${style}>
+      <div class="hero"${style}>
         <h1>${escapeHtml(component.headline)}</h1>
         <p>${escapeHtml(component.subheadline)}</p>
         <a class="cta" href="${escapeHtml(component.primaryCtaHref)}">${escapeHtml(component.primaryCtaText)}</a>
-      </section>
+      </div>
     `;
   }
 
   if (component.type === "rich_text") {
-    return `<section class="richText">${component.html}</section>`;
+    return `<div class="richText">${component.html}</div>`;
   }
 
   if (component.type === "image") {
@@ -47,7 +47,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
 
   if (component.type === "contact_form") {
     return `
-      <section class="contactForm" id="contact">
+      <div class="contactForm" id="contact">
         <h2>${escapeHtml(component.headline)}</h2>
         <form method="post" action="#">
           <label>
@@ -64,11 +64,26 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
           </label>
           <button type="submit">${escapeHtml(component.submitLabel)}</button>
         </form>
-      </section>
+      </div>
     `;
   }
 
   return "";
+}
+
+function renderSection(section: Section, assetsById: Map<string, Asset>): string {
+  const styles: string[] = [];
+  if (section.style.background) styles.push(`background:${escapeHtml(section.style.background)};`);
+  if (section.style.padding !== null) styles.push(`padding:${section.style.padding}px;`);
+  if (section.style.maxWidth !== null) styles.push(`max-width:${section.style.maxWidth}px;margin:0 auto;`);
+  if (section.style.background || section.style.padding !== null) styles.push("border-radius:18px;");
+
+  const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
+
+  const inner = section.components.map((c) => renderComponent(c, assetsById)).join("\n");
+  return `<section class="section"${styleAttr}>
+${inner}
+</section>`;
 }
 
 export function renderPageHtml(page: Page): { html: string; css: string } {
@@ -77,6 +92,7 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     html,body { height:100%; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 15% 10%, rgba(124,92,255,0.35), transparent 55%), radial-gradient(900px 500px at 70% 20%, rgba(34,211,238,0.22), transparent 55%), var(--bg); color: var(--text); }
     .container { max-width: 980px; margin: 0 auto; padding: 32px 16px; display:flex; flex-direction:column; gap: 18px; }
+    .section { display:flex; flex-direction:column; gap: 12px; }
     .hero { border-radius: 18px; padding: 32px; border: 1px solid var(--line); background: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), rgba(0,0,0,0.22); }
     .hero h1 { margin:0; font-size: 44px; line-height: 1.05; letter-spacing:-0.02em; }
     .hero p { margin: 12px 0 0 0; color: rgba(232,238,252,0.9); max-width: 60ch; line-height: 1.45; }
@@ -95,10 +111,7 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
 
   const assetsById = new Map(page.assets.map((a) => [a.id, a]));
 
-  const body = page.sections
-    .flatMap((s) => s.components)
-    .map((c) => renderComponent(c, assetsById))
-    .join("\n");
+  const body = page.sections.map((s) => renderSection(s, assetsById)).join("\n");
 
   const html = `<!doctype html>
 <html lang="${escapeHtml(page.metadata.lang)}">

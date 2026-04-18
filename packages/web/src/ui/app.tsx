@@ -21,7 +21,7 @@ function createId(prefix: string): string {
 }
 
 function createSection(label: string): Section {
-  return { id: createId("sec"), label, components: [] };
+  return { id: createId("sec"), label, style: { background: null, padding: null, maxWidth: null }, components: [] };
 }
 
 function createComponent(type: Component["type"]): Component {
@@ -758,7 +758,19 @@ export function App() {
               {page ? (
                 <div className="stack" style={{ gap: 18 }}>
                   {page.sections.map((section) => (
-                    <div key={section.id} className="stack" style={{ gap: 12 }}>
+                    <div
+                      key={section.id}
+                      className="previewSection"
+                      data-testid="preview-section"
+                      data-section-id={section.id}
+                      style={{
+                        background: section.style.background ?? undefined,
+                        padding: section.style.padding !== null ? section.style.padding : undefined,
+                        maxWidth: section.style.maxWidth ?? undefined,
+                        margin: section.style.maxWidth ? "0 auto" : undefined,
+                      }}
+                    >
+                      <div className="stack" style={{ gap: 12 }}>
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
@@ -869,6 +881,7 @@ export function App() {
                           );
                         }}
                       />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1386,6 +1399,79 @@ function Inspector(props: {
       <div className="cardTitle">Inspector</div>
       <div className="stack">
         <div className="muted">Section: {section.label}</div>
+
+        <div className="card">
+          <div className="cardTitle">Section style</div>
+          <div className="stack">
+            <div className="field">
+              <label>Background</label>
+              <div className="row">
+                <input
+                  data-testid="section-bg"
+                  type="color"
+                  value={section.style.background ?? "#000000"}
+                  onChange={(e) =>
+                    onUpdate({
+                      ...section,
+                      style: { ...section.style, background: e.target.value },
+                    })
+                  }
+                />
+                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, background: null } })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Padding</label>
+              <div className="row">
+                <input
+                  data-testid="section-padding"
+                  type="range"
+                  min={0}
+                  max={96}
+                  value={section.style.padding ?? 0}
+                  onChange={(e) =>
+                    onUpdate({
+                      ...section,
+                      style: { ...section.style, padding: Number(e.target.value) },
+                    })
+                  }
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{section.style.padding ?? 0}px</span>
+                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, padding: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Max width</label>
+              <div className="row">
+                <select
+                  data-testid="section-maxwidth"
+                  value={section.style.maxWidth ?? ""}
+                  onChange={(e) =>
+                    onUpdate({
+                      ...section,
+                      style: { ...section.style, maxWidth: e.target.value ? Number(e.target.value) : null },
+                    })
+                  }
+                >
+                  <option value="">(auto)</option>
+                  <option value="720">720</option>
+                  <option value="980">980</option>
+                  <option value="1200">1200</option>
+                </select>
+                <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, maxWidth: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="row">
           <button className="btn" onClick={() => add("hero")}>
             + Hero
