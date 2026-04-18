@@ -374,13 +374,12 @@ export function App() {
     }
   }, [page, projectId]);
 
-  const updatePage = useCallback(
-    (updater: (prev: Page) => Page) => {
-      if (!page) return;
-      setState({ kind: "ready", page: updater(page) });
-    },
-    [page]
-  );
+  const updatePage = useCallback((updater: (prev: Page) => Page) => {
+    setState((prev) => {
+      if (prev.kind !== "ready") return prev;
+      return { kind: "ready", page: updater(prev.page) };
+    });
+  }, []);
 
   const updateComponentInPage = useCallback(
     (sectionId: string, componentId: string, updater: (prev: Component) => Component) => {
@@ -1160,16 +1159,6 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
-          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
-              Duplicate
-            </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
-              Delete
-            </button>
-          </div>
-        ) : null}
         <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
       </div>
     );

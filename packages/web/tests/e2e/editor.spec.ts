@@ -49,6 +49,15 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   );
   expect(types[0]).toBe("rich_text");
   expect(types[1]).toBe("hero");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(typesAfter[0]).toBe("rich_text");
+  expect(typesAfter[1]).toBe("hero");
 });
 
 test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
@@ -67,6 +76,11 @@ test("components can be moved across sections via drag and drop in Preview", asy
 
   const cards = page.getByTestId("structure-section-card");
   await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("2 components");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 });
@@ -95,6 +109,13 @@ test("components can be reordered via drag and drop in Preview (within a section
     els.map((el) => el.getAttribute("data-component-type"))
   );
   expect(types[0]).toBe("rich_text");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+  const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(typesAfter[0]).toBe("rich_text");
 });
 
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
@@ -134,8 +155,16 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   await page.getByTestId("preview-duplicate").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
 
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
+
   await heroItem.first().click();
   await page.getByTestId("preview-delete").click();
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
 });
 
@@ -189,10 +218,13 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   });
 
   await expect(img).not.toHaveAttribute("src", before);
+  const afterReplace = await img.getAttribute("src");
+  if (!afterReplace) throw new Error("missing img src after replace");
 
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
+  await expect(page.locator(".imageBlock img")).toHaveAttribute("src", afterReplace);
 });
 
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
