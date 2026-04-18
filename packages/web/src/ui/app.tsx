@@ -15,6 +15,20 @@ type LoadState =
   | { kind: "ready"; page: Page }
   | { kind: "error"; message: string };
 
+type ImageEditorState =
+  | {
+      kind: "asset";
+      assetId: string;
+      replaceAllUsages: boolean;
+    }
+  | {
+      kind: "component";
+      assetId: string;
+      sectionId: string;
+      componentId: string;
+      replaceAllUsages: boolean;
+    };
+
 const DEFAULT_PROJECT_ID = "demo";
 
 function createId(prefix: string): string {
@@ -345,6 +359,7 @@ export function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const page = state.kind === "ready" ? state.page : null;
   const canEdit = state.kind === "ready" && loadedProjectId === projectId;
@@ -493,6 +508,23 @@ export function App() {
       return asset;
     },
     [activeProjectId, maxUploadPx, optimizeUploads, updatePage]
+  );
+
+  const replaceAssetIdUsagesInPage = useCallback(
+    (oldAssetId: string, newAssetId: string) => {
+      updatePage((prev) => {
+        const nextSections = prev.sections.map((s) => ({
+          ...s,
+          components: s.components.map((c) => {
+            if (c.type === "hero" && c.backgroundImageAssetId === oldAssetId) return { ...c, backgroundImageAssetId: newAssetId };
+            if (c.type === "image" && c.assetId === oldAssetId) return { ...c, assetId: newAssetId };
+            return c;
+          }),
+        }));
+        return PageSchema.parse({ ...prev, sections: nextSections });
+      });
+    },
+    [updatePage]
   );
 
   const removeSection = useCallback(
@@ -699,6 +731,15 @@ export function App() {
                             }
                           />
                         </div>
+                        <div className="row" style={{ paddingTop: 18 }}>
+                          <button
+                            className="btn"
+                            disabled={!canEdit}
+                            onClick={() => setImageEditor({ kind: "asset", assetId: asset.id, replaceAllUsages: false })}
+                          >
+                            Edit
+                          </button>
+                        </div>
                       </div>
                     ))}
                     <div className="muted">Alt text is stored in <code>page.json</code> (asset metadata).</div>
@@ -859,6 +900,16 @@ export function App() {
                             });
                           }}
                           onUploadImageAssetOnly={uploadImageAssetOnly}
+                          onEditImage={() => {
+                            if (component.type !== "image") return;
+                            setImageEditor({
+                              kind: "component",
+                              assetId: component.assetId,
+                              sectionId: section.id,
+                              componentId: component.id,
+                              replaceAllUsages: false,
+                            });
+                          }}
                           onMoveHere={(fromSectionId, fromComponentId) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
@@ -1081,6 +1132,56 @@ export function App() {
           )}
         </div>
       </div>
+
+      {page && imageEditor ? (
+        <ImageEditorModal
+          key={`${imageEditor.kind}:${imageEditor.assetId}`}
+          title={imageEditor.kind === "asset" ? "Edit asset" : "Edit image in page"}
+          srcUrl={() => {
+            const asset = page.assets.find((a) => a.type === "image" && a.id === imageEditor.assetId);
+            if (!asset || asset.type !== "image") return "";
+            return `/projects/${encodeURIComponent(activeProjectId)}/assets/${encodeURIComponent(asset.filename)}`;
+          }}
+          initialAlt={() => {
+            const asset = page.assets.find((a) => a.type === "image" && a.id === imageEditor.assetId);
+            return asset && asset.type === "image" ? asset.alt : "";
+          }}
+          canEdit={canEdit}
+          replaceAllUsages={imageEditor.replaceAllUsages}
+          onChangeReplaceAllUsages={(next) =>
+            setImageEditor((prev) => (prev ? { ...prev, replaceAllUsages: next } : prev))
+          }
+          onCancel={() => setImageEditor(null)}
+          onSave={async (file) => {
+            const oldAsset = page.assets.find((a) => a.type === "image" && a.id === imageEditor.assetId);
+            const alt = oldAsset && oldAsset.type === "image" ? oldAsset.alt : "";
+            const newAsset = await apiUploadImage(activeProjectId, file, alt);
+
+            updatePage((prev) => PageSchema.parse({ ...prev, assets: [...prev.assets, newAsset] }));
+
+            if (imageEditor.kind === "component") {
+              updatePage((prev) => {
+                const nextSections = prev.sections.map((s) => {
+                  if (s.id !== imageEditor.sectionId) return s;
+                  return {
+                    ...s,
+                    components: s.components.map((c) =>
+                      c.id === imageEditor.componentId && c.type === "image" ? { ...c, assetId: newAsset.id } : c
+                    ),
+                  };
+                });
+                return PageSchema.parse({ ...prev, sections: nextSections });
+              });
+            }
+
+            if (imageEditor.replaceAllUsages) {
+              replaceAssetIdUsagesInPage(imageEditor.assetId, newAsset.id);
+            }
+
+            setImageEditor(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1097,10 +1198,24 @@ function PreviewComponent(props: {
   onDelete: () => void;
   onDuplicate: () => void;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
+  onEditImage?: () => void;
   onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
 }) {
-  const { sectionId, component, page, projectId, isSelected, canEdit, onSelect, onUpdate, onDelete, onDuplicate, onUploadImageAssetOnly, onMoveHere } =
-    props;
+  const {
+    sectionId,
+    component,
+    page,
+    projectId,
+    isSelected,
+    canEdit,
+    onSelect,
+    onUpdate,
+    onDelete,
+    onDuplicate,
+    onUploadImageAssetOnly,
+    onEditImage,
+    onMoveHere,
+  } = props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
 
   const dragProps = {
@@ -1359,6 +1474,9 @@ function PreviewComponent(props: {
                 }}
               />
             </label>
+            <button className="btn" onClick={() => onEditImage?.()} disabled={!canEdit || !onEditImage}>
+              Edit
+            </button>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
             </button>
@@ -1963,4 +2081,361 @@ function ComponentFields(props: {
   }
 
   return null;
+}
+
+function ImageEditorModal(props: {
+  title: string;
+  srcUrl: () => string;
+  initialAlt: () => string;
+  canEdit: boolean;
+  replaceAllUsages: boolean;
+  onChangeReplaceAllUsages: (next: boolean) => void;
+  onCancel: () => void;
+  onSave: (file: File) => Promise<void>;
+}) {
+  const { title, srcUrl, canEdit, replaceAllUsages, onChangeReplaceAllUsages, onCancel, onSave } = props;
+  const src = srcUrl();
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [viewport, setViewport] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  const [aspect, setAspect] = useState<string>("free"); // free | 1:1 | 4:3 | 16:9 | original
+  const [cropScale, setCropScale] = useState(0.82); // fraction of viewport
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [outputMaxPx, setOutputMaxPx] = useState(1600);
+  const [format, setFormat] = useState<"image/webp" | "image/png" | "image/jpeg">("image/webp");
+  const [quality, setQuality] = useState(0.9);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const update = () => setViewport({ w: el.clientWidth, h: el.clientHeight });
+    update();
+
+    const obs = new ResizeObserver(() => update());
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const computed = useMemo(() => {
+    if (!natural || viewport.w <= 0 || viewport.h <= 0) return null;
+    const vw = viewport.w;
+    const vh = viewport.h;
+
+    let desiredAspect: number | null = null;
+    if (aspect === "1:1") desiredAspect = 1;
+    if (aspect === "4:3") desiredAspect = 4 / 3;
+    if (aspect === "16:9") desiredAspect = 16 / 9;
+    if (aspect === "original") desiredAspect = natural.w / natural.h;
+
+    const maxW = vw * cropScale;
+    const maxH = vh * cropScale;
+    let cw = maxW;
+    let ch = maxH;
+    if (desiredAspect) {
+      cw = maxW;
+      ch = cw / desiredAspect;
+      if (ch > maxH) {
+        ch = maxH;
+        cw = ch * desiredAspect;
+      }
+    }
+
+    const cx = (vw - cw) / 2;
+    const cy = (vh - ch) / 2;
+
+    const baseScale = Math.max(cw / natural.w, ch / natural.h);
+    const scale = baseScale * zoom;
+
+    const imgHalfW = (natural.w * scale) / 2;
+    const imgHalfH = (natural.h * scale) / 2;
+
+    const minCenterX = cx + cw - imgHalfW;
+    const maxCenterX = cx + imgHalfW;
+    const minCenterY = cy + ch - imgHalfH;
+    const maxCenterY = cy + imgHalfH;
+
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    const clampedCenterX = clamp(vw / 2 + offset.x, minCenterX, maxCenterX);
+    const clampedCenterY = clamp(vh / 2 + offset.y, minCenterY, maxCenterY);
+
+    const clampedOffset = { x: clampedCenterX - vw / 2, y: clampedCenterY - vh / 2 };
+
+    const imgLeft = clampedCenterX - imgHalfW;
+    const imgTop = clampedCenterY - imgHalfH;
+
+    return {
+      crop: { x: cx, y: cy, w: cw, h: ch },
+      scale,
+      clampedOffset,
+      imgLeft,
+      imgTop,
+      vw,
+      vh,
+      natural,
+    };
+  }, [aspect, cropScale, natural, offset.x, offset.y, viewport.h, viewport.w, zoom]);
+
+  useEffect(() => {
+    if (!computed) return;
+    if (computed.clampedOffset.x === offset.x && computed.clampedOffset.y === offset.y) return;
+    setOffset(computed.clampedOffset);
+  }, [computed, offset.x, offset.y]);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (!canEdit) return;
+      if (!computed) return;
+      const el = viewportRef.current;
+      if (!el) return;
+      el.setPointerCapture(e.pointerId);
+      const start = { x: e.clientX, y: e.clientY };
+      const startOffset = { ...offset };
+
+      const onMove = (ev: PointerEvent) => {
+        setOffset({ x: startOffset.x + (ev.clientX - start.x), y: startOffset.y + (ev.clientY - start.y) });
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [canEdit, computed, offset]
+  );
+
+  const renderToFile = useCallback(async (): Promise<File> => {
+    if (!computed || !imgRef.current) throw new Error("Image is not ready yet.");
+
+    const { crop, imgLeft, imgTop, scale, natural: nat } = computed;
+    const sx = (crop.x - imgLeft) / scale;
+    const sy = (crop.y - imgTop) / scale;
+    const sw = crop.w / scale;
+    const sh = crop.h / scale;
+
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    const clampedSw = clamp(sw, 1, nat.w);
+    const clampedSh = clamp(sh, 1, nat.h);
+    const clampedSx = clamp(sx, 0, nat.w - clampedSw);
+    const clampedSy = clamp(sy, 0, nat.h - clampedSh);
+
+    const ratio = clampedSw / clampedSh;
+    let outW = outputMaxPx;
+    let outH = Math.max(1, Math.round(outW / ratio));
+    if (outH > outputMaxPx) {
+      outH = outputMaxPx;
+      outW = Math.max(1, Math.round(outH * ratio));
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Missing 2d context");
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(imgRef.current, clampedSx, clampedSy, clampedSw, clampedSh, 0, 0, outW, outH);
+
+    const blob =
+      (await canvasToBlob(canvas, format, format === "image/png" ? undefined : quality).catch(() => null)) ??
+      (await canvasToBlob(canvas, "image/png").catch(() => null));
+
+    if (!blob) throw new Error("Failed to create image output");
+
+    const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+    return new File([blob], `edited.${ext}`, { type: blob.type });
+  }, [computed, format, outputMaxPx, quality]);
+
+  return (
+    <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={() => onCancel()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modalHeader">
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <div style={{ fontWeight: 900 }}>{title}</div>
+            <span className="badge">{format.replace("image/", "")}</span>
+          </div>
+          <div className="row">
+            <button className="btn" onClick={() => onCancel()}>
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="modalBody">
+          {src ? (
+            <div className="stack" style={{ gap: 12 }}>
+              <div className="cropViewport" ref={viewportRef} onPointerDown={onPointerDown}>
+                <img
+                  ref={imgRef}
+                  src={src}
+                  alt=""
+                  draggable={false}
+                  onLoad={(e) => {
+                    const el = e.currentTarget;
+                    setNatural({ w: el.naturalWidth, h: el.naturalHeight });
+                    setError(null);
+                  }}
+                  onError={() => setError("Failed to load image.")}
+                  style={
+                    computed
+                      ? {
+                          position: "absolute",
+                          left: "50%",
+                          top: "50%",
+                          transform: `translate(-50%, -50%) translate(${computed.clampedOffset.x}px, ${computed.clampedOffset.y}px) scale(${computed.scale})`,
+                          transformOrigin: "center center",
+                          willChange: "transform",
+                          userSelect: "none",
+                          pointerEvents: "none",
+                        }
+                      : {
+                          position: "absolute",
+                          left: "50%",
+                          top: "50%",
+                          transform: "translate(-50%, -50%)",
+                          opacity: 0.65,
+                          pointerEvents: "none",
+                        }
+                  }
+                />
+
+                {computed ? (
+                  <div
+                    className="cropBox"
+                    style={{
+                      left: computed.crop.x,
+                      top: computed.crop.y,
+                      width: computed.crop.w,
+                      height: computed.crop.h,
+                    }}
+                  />
+                ) : null}
+              </div>
+
+              {error ? <div className="card">{error}</div> : null}
+
+              <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div className="field" style={{ minWidth: 160 }}>
+                  <label>Aspect</label>
+                  <select value={aspect} onChange={(e) => setAspect(e.target.value)} disabled={!canEdit}>
+                    <option value="free">free</option>
+                    <option value="original">original</option>
+                    <option value="1:1">1:1</option>
+                    <option value="4:3">4:3</option>
+                    <option value="16:9">16:9</option>
+                  </select>
+                </div>
+
+                <div className="field" style={{ minWidth: 220, flex: 1 }}>
+                  <label>Zoom</label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.01}
+                    value={zoom}
+                    disabled={!canEdit}
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                  />
+                </div>
+
+                <div className="field" style={{ minWidth: 220, flex: 1 }}>
+                  <label>Crop size</label>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={0.95}
+                    step={0.01}
+                    value={cropScale}
+                    disabled={!canEdit}
+                    onChange={(e) => setCropScale(Number(e.target.value))}
+                  />
+                </div>
+
+                <div className="field" style={{ width: 130 }}>
+                  <label>Max px</label>
+                  <input
+                    inputMode="numeric"
+                    value={String(outputMaxPx)}
+                    disabled={!canEdit}
+                    onChange={(e) => setOutputMaxPx(Number(e.target.value || "0") || 1600)}
+                  />
+                </div>
+
+                <div className="field" style={{ width: 140 }}>
+                  <label>Format</label>
+                  <select value={format} onChange={(e) => setFormat(e.target.value as typeof format)} disabled={!canEdit}>
+                    <option value="image/webp">webp</option>
+                    <option value="image/jpeg">jpg</option>
+                    <option value="image/png">png</option>
+                  </select>
+                </div>
+
+                <div className="field" style={{ minWidth: 180 }}>
+                  <label>Quality</label>
+                  <input
+                    type="range"
+                    min={0.6}
+                    max={1}
+                    step={0.01}
+                    value={quality}
+                    disabled={!canEdit || format === "image/png"}
+                    onChange={(e) => setQuality(Number(e.target.value))}
+                  />
+                </div>
+              </div>
+
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={replaceAllUsages}
+                    disabled={!canEdit}
+                    onChange={(e) => onChangeReplaceAllUsages(e.target.checked)}
+                  />
+                  <span className="muted">Replace all usages on the page</span>
+                </label>
+
+                <div className="row">
+                  <button className="btn" onClick={() => onCancel()} disabled={isSaving}>
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btnPrimary"
+                    disabled={!canEdit || isSaving || !natural}
+                    onClick={async () => {
+                      setIsSaving(true);
+                      setError(null);
+                      try {
+                        const file = await renderToFile();
+                        await onSave(file);
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : "Failed to save edited image.");
+                      } finally {
+                        setIsSaving(false);
+                      }
+                    }}
+                  >
+                    {isSaving ? "Saving..." : "Save as new asset"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="card">Missing image source.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
