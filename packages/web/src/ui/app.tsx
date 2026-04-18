@@ -601,7 +601,12 @@ export function App() {
                 <button className="btn" onClick={() => void exportProject()} disabled={!page || isExporting}>
                   {isExporting ? "Exporting..." : "Export static site"}
                 </button>
-                <button className="btn" onClick={() => void captureScreenshot()} disabled={!page || isCapturingScreenshot}>
+                <button
+                  className="btn"
+                  data-testid="capture-screenshot"
+                  onClick={() => void captureScreenshot()}
+                  disabled={!page || isCapturingScreenshot}
+                >
                   {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
                 </button>
               </div>
@@ -618,6 +623,7 @@ export function App() {
                   <img
                     src={screenshotUrl}
                     alt="Preview screenshot"
+                    data-testid="preview-screenshot"
                     style={{ width: "100%", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)" }}
                   />
                 </div>
@@ -737,6 +743,8 @@ export function App() {
                   <div
                     key={section.id}
                     className="card"
+                    data-testid="structure-section-card"
+                    data-section-id={section.id}
                     draggable
                     onDragStart={(e) => setDragPayload(e, { kind: "section", sectionId: section.id })}
                     onDragOver={(e) => {
@@ -848,6 +856,9 @@ function PreviewComponent(props: {
     return (
       <div
         className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
         onClick={(e) => {
           e.preventDefault();
           onSelect();
@@ -867,7 +878,13 @@ function PreviewComponent(props: {
   if (component.type === "rich_text") {
     if (isSelected) {
       return (
-        <div className={wrapperClass} onClick={() => onSelect()}>
+        <div
+          className={wrapperClass}
+          data-testid="preview-item"
+          data-component-id={component.id}
+          data-component-type={component.type}
+          onClick={() => onSelect()}
+        >
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
@@ -887,7 +904,13 @@ function PreviewComponent(props: {
     }
 
     return (
-      <div className={wrapperClass} onClick={() => onSelect()}>
+      <div
+        className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
+        onClick={() => onSelect()}
+      >
         <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
       </div>
     );
@@ -895,7 +918,13 @@ function PreviewComponent(props: {
 
   if (component.type === "contact_form") {
     return (
-      <div className={wrapperClass} onClick={() => onSelect()}>
+      <div
+        className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
+        onClick={() => onSelect()}
+      >
         <div className="contactForm" id="contact">
           <h3>{component.headline}</h3>
           <form onSubmit={(e) => e.preventDefault()}>
@@ -924,7 +953,13 @@ function PreviewComponent(props: {
     const asset = page.assets.find((a) => a.type === "image" && a.id === component.assetId);
     if (!asset || asset.type !== "image") return null;
     return (
-      <div className={wrapperClass} onClick={() => onSelect()}>
+      <div
+        className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
+        onClick={() => onSelect()}
+      >
         <div className="imageBlock">
           <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} />
           {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
@@ -1041,6 +1076,9 @@ function Inspector(props: {
             <div
               key={c.id}
               className="row"
+              data-testid="inspector-component-row"
+              data-component-id={c.id}
+              data-component-type={c.type}
               style={
                 dragOverComponentId === c.id
                   ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
@@ -1070,6 +1108,8 @@ function Inspector(props: {
               <div className="row" style={{ gap: 8 }}>
                 <span
                   className="dragHandle"
+                  data-testid="inspector-component-drag-handle"
+                  data-component-id={c.id}
                   draggable
                   title="Drag to reorder"
                   onDragStart={(e) => setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id })}
