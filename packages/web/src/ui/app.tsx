@@ -127,6 +127,10 @@ function sanitizeRichTextHtml(inputHtml: string): string {
   return outWrapper.innerHTML;
 }
 
+function sanitizeInlineText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 type DragPayload =
   | { kind: "section"; sectionId: string }
   | { kind: "component"; sectionId: string; componentId: string };
@@ -967,8 +971,32 @@ function PreviewComponent(props: {
         }}
       >
         <div className="hero" style={heroStyle}>
-          <h1>{component.headline}</h1>
-          <p>{component.subheadline}</p>
+          <h1
+            contentEditable={isSelected}
+            suppressContentEditableWarning
+            onClick={(e) => (isSelected ? e.stopPropagation() : null)}
+            onBlur={(e) => {
+              if (!isSelected) return;
+              const next = sanitizeInlineText(e.currentTarget.innerText);
+              if (!next) return;
+              onUpdate({ ...component, headline: next });
+            }}
+          >
+            {component.headline}
+          </h1>
+          <p
+            contentEditable={isSelected}
+            suppressContentEditableWarning
+            onClick={(e) => (isSelected ? e.stopPropagation() : null)}
+            onBlur={(e) => {
+              if (!isSelected) return;
+              const next = sanitizeInlineText(e.currentTarget.innerText);
+              if (!next) return;
+              onUpdate({ ...component, subheadline: next });
+            }}
+          >
+            {component.subheadline}
+          </p>
           <a className="cta" href={component.primaryCtaHref} onClick={(e) => e.preventDefault()}>
             {component.primaryCtaText}
           </a>
@@ -1031,7 +1059,19 @@ function PreviewComponent(props: {
         onClick={() => onSelect()}
       >
         <div className="contactForm" id="contact">
-          <h3>{component.headline}</h3>
+          <h3
+            contentEditable={isSelected}
+            suppressContentEditableWarning
+            onClick={(e) => (isSelected ? e.stopPropagation() : null)}
+            onBlur={(e) => {
+              if (!isSelected) return;
+              const next = sanitizeInlineText(e.currentTarget.innerText);
+              if (!next) return;
+              onUpdate({ ...component, headline: next });
+            }}
+          >
+            {component.headline}
+          </h3>
           <form onSubmit={(e) => e.preventDefault()}>
             <div className="field">
               <label>Name</label>
@@ -1046,7 +1086,19 @@ function PreviewComponent(props: {
               <textarea rows={4} />
             </div>
             <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()}>
-              {component.submitLabel}
+              <span
+                contentEditable={isSelected}
+                suppressContentEditableWarning
+                onClick={(e) => (isSelected ? e.stopPropagation() : null)}
+                onBlur={(e) => {
+                  if (!isSelected) return;
+                  const next = sanitizeInlineText(e.currentTarget.innerText);
+                  if (!next) return;
+                  onUpdate({ ...component, submitLabel: next });
+                }}
+              >
+                {component.submitLabel}
+              </span>
             </button>
           </form>
         </div>

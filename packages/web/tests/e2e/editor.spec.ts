@@ -77,6 +77,28 @@ test("components can be reordered via drag and drop in Preview (within a section
   expect(types[0]).toBe("rich_text");
 });
 
+test("hero can be edited inline in Preview and persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_inline_hero_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("add-hero").click();
+
+  await page.locator('[data-testid="preview-item"][data-component-type="hero"]').click();
+
+  const headline = page.locator(".hero h1");
+  await headline.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("Hello from inline hero");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await expect(page.locator(".hero h1")).toContainText("Hello from inline hero");
+});
+
 test("rich text can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 
