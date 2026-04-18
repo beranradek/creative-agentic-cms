@@ -3,6 +3,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { PageSchema, type Page, type Asset, type Component } from "@cac/shared";
 import { SimpleCircuitBreaker } from "./circuit-breaker.js";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { assertNoImplicitDeletions, assertNoUnexpectedStructuralChanges } from "./guardrails.js";
 
 const AgentInputSchema = z.object({
   userMessage: z.string().min(1),
@@ -23,40 +24,6 @@ export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
 const circuitBreaker = new SimpleCircuitBreaker(3, 30_000);
 
-function collectIds(page: AgentInput["page"]) {
-  const sectionIds = new Set<string>();
-  const componentIds = new Set<string>();
-  const assetIds = new Set<string>();
-
-  for (const section of page.sections) {
-    sectionIds.add(section.id);
-    for (const component of section.components) {
-      componentIds.add(component.id);
-    }
-  }
-
-  for (const asset of page.assets) {
-    assetIds.add(asset.id);
-  }
-
-  return { sectionIds, componentIds, assetIds };
-}
-
-function assertNoImplicitDeletions(prev: AgentInput["page"], next: AgentInput["page"]) {
-  const prevIds = collectIds(prev);
-  const nextIds = collectIds(next);
-
-  const removedSections = [...prevIds.sectionIds].filter((id) => !nextIds.sectionIds.has(id));
-  const removedComponents = [...prevIds.componentIds].filter((id) => !nextIds.componentIds.has(id));
-  const removedAssets = [...prevIds.assetIds].filter((id) => !nextIds.assetIds.has(id));
-
-  if (removedSections.length || removedComponents.length || removedAssets.length) {
-    throw new Error(
-      `Agent removed existing content without explicit permission (sections: ${removedSections.length}, components: ${removedComponents.length}, assets: ${removedAssets.length}). Try again with an explicit delete instruction.`
-    );
-  }
-}
-
 function buildSystemPrompt() {
   return `You are an expert creative CMS editor agent.
 
@@ -65,6 +32,8 @@ You edit a single page represented as JSON.
 Rules:
 - Output MUST match the provided JSON schema (structured output).
 - Preserve existing ids whenever you edit existing content.
+- Do not restructure, reorder, or move blocks unless explicitly asked.
+- Do not add any new sections/components/assets unless explicitly asked.
 - When creating new ids, use deterministic prefixes:
   - sec_<uuid> for sections
   - cmp_<uuid> for components
@@ -208,6 +177,7 @@ ${parsed.userMessage}`;
 
     const output = AgentOutputSchema.parse(response);
     assertNoImplicitDeletions(parsed.page, output.page);
+    assertNoUnexpectedStructuralChanges(parsed.page, output.page, parsed.userMessage);
     circuitBreaker.onSuccess();
     return output;
   } catch (error) {
