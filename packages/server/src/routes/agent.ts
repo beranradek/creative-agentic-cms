@@ -1,3 +1,5 @@
+import path from "node:path";
+import { readFile } from "node:fs/promises";
 import express from "express";
 import { z, type ZodType } from "zod";
 import { CircuitBreakerOpenError, runCmsAgent } from "@cac/agent";
@@ -31,11 +33,31 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
     }
 
     try {
+      let screenshotPngBase64: string | undefined;
+      if (body.screenshotUrl) {
+        const expectedPrefix = `/projects/${encodeURIComponent(projectId)}/.workspace/screenshots/`;
+        const raw = body.screenshotUrl;
+        if (raw.startsWith(expectedPrefix)) {
+          const encodedFilename = raw.slice(expectedPrefix.length);
+          const filename = decodeURIComponent(encodedFilename);
+          if (filename && filename === path.basename(filename)) {
+            const screenshotPathAbs = path.join(store.getProjectDir(projectId), ".workspace", "screenshots", filename);
+            try {
+              const buf = await readFile(screenshotPathAbs);
+              screenshotPngBase64 = buf.toString("base64");
+            } catch {
+              // Best-effort: ignore screenshot read failures.
+            }
+          }
+        }
+      }
+
       const output = await runCmsAgent({
         userMessage: body.message,
         projectId,
         page,
         screenshotUrl: body.screenshotUrl,
+        screenshotPngBase64,
       });
 
       const nextPage = PageSchema.parse(output.page);

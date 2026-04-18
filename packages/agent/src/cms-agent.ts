@@ -2,12 +2,14 @@ import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 import { PageSchema, type Page, type Asset, type Component } from "@cac/shared";
 import { SimpleCircuitBreaker } from "./circuit-breaker.js";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
 const AgentInputSchema = z.object({
   userMessage: z.string().min(1),
   projectId: z.string().min(1),
   page: PageSchema,
   screenshotUrl: z.string().min(1).optional(),
+  screenshotPngBase64: z.string().min(1).optional(),
 });
 
 export type AgentInput = z.infer<typeof AgentInputSchema>;
@@ -157,24 +159,28 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
       apiKey: process.env.OPENAI_API_KEY,
     }).withStructuredOutput(AgentOutputSchema, { name: "cms_edit_page" });
 
-    const response = await model.invoke([
-      { role: "system", content: buildSystemPrompt() },
-      {
-        role: "user",
-        content: `Project: ${parsed.projectId}
+    const userText = `Project: ${parsed.projectId}
 
 Page snapshot (for fast understanding):
 ${buildPageSnapshot(parsed.page)}
 
-Latest screenshot (for the human user to inspect):
+Latest screenshot (rendered preview):
 ${parsed.screenshotUrl ?? "(not available)"}
 
 Current page JSON (authoritative, must be edited via schema):
 ${JSON.stringify(parsed.page, null, 2)}
 
 User request:
-${parsed.userMessage}`,
-      },
+${parsed.userMessage}`;
+
+    const humanContent = [
+      { type: "text", text: userText },
+      ...(parsed.screenshotPngBase64 ? [{ type: "image", source_type: "base64", data: parsed.screenshotPngBase64 }] : []),
+    ] as unknown as HumanMessage["content"];
+
+    const response = await model.invoke([
+      new SystemMessage({ content: buildSystemPrompt() }),
+      new HumanMessage({ content: humanContent }),
     ]);
 
     const output = AgentOutputSchema.parse(response);

@@ -20,6 +20,7 @@ export function createPreviewRouter(options: CreatePreviewRouterOptions): expres
       .object({
         width: z.number().int().positive().optional(),
         height: z.number().int().positive().optional(),
+        fullPage: z.boolean().optional(),
       })
       .passthrough()
       .parse(req.body ?? {});
@@ -49,6 +50,7 @@ export function createPreviewRouter(options: CreatePreviewRouterOptions): expres
 
     const width = body.width ?? 1200;
     const height = body.height ?? 720;
+    const fullPage = body.fullPage ?? true;
 
     const screenshotsDirAbs = path.join(store.getProjectDir(projectId), ".workspace", "screenshots");
     await mkdir(screenshotsDirAbs, { recursive: true });
@@ -59,7 +61,7 @@ export function createPreviewRouter(options: CreatePreviewRouterOptions): expres
     try {
       const page = await browser.newPage({ viewport: { width, height } });
       await page.goto(`file://${path.join(outputDirAbs, "index.html")}`, { waitUntil: "load" });
-      await page.screenshot({ path: screenshotPathAbs, fullPage: true });
+      await page.screenshot({ path: screenshotPathAbs, fullPage });
     } finally {
       await browser.close();
     }

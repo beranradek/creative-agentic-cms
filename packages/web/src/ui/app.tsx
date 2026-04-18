@@ -216,7 +216,7 @@ async function apiCaptureScreenshot(projectId: string): Promise<{ screenshotUrl:
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/preview/screenshot`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ width: 1200, height: 720 }),
+    body: JSON.stringify({ width: 1024, height: 768, fullPage: false }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
