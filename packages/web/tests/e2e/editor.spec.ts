@@ -119,6 +119,26 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await expect(page.locator(".hero h1")).toContainText("Hello from inline hero");
 });
 
+test("can duplicate and delete a component from Preview toolbar", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_toolbar_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("add-hero").click();
+
+  const heroItem = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await heroItem.click();
+
+  await page.getByTestId("preview-duplicate").click();
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
+
+  await heroItem.first().click();
+  await page.getByTestId("preview-delete").click();
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
+});
+
 test("rich text can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 
@@ -141,6 +161,38 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await page.getByTestId("reload-page").click();
 
   await expect(page.locator(".richText")).toContainText("Hello inline editor");
+});
+
+test("image can be replaced from Preview toolbar (uploads new asset)", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_img_replace_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  const img = page.locator(".imageBlock img");
+  await expect(img).toHaveCount(1);
+  const before = await img.getAttribute("src");
+  if (!before) throw new Error("missing img src");
+
+  await page.locator('[data-testid="preview-item"][data-component-type="image"]').click();
+  await page.getByTestId("preview-image-replace-input").setInputFiles({
+    name: "tiny2.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  await expect(img).not.toHaveAttribute("src", before);
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
 });
 
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {

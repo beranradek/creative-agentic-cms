@@ -449,6 +449,16 @@ export function App() {
     });
   }, [page, projectId, updatePage, optimizeUploads, maxUploadPx]);
 
+  const uploadImageAssetOnly = useCallback(
+    async (file: File) => {
+      const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
+      const asset = await apiUploadImage(projectId, toUpload);
+      updatePage((prev) => PageSchema.parse({ ...prev, assets: [...prev.assets, asset] }));
+      return asset;
+    },
+    [maxUploadPx, optimizeUploads, projectId, updatePage]
+  );
+
   const removeSection = useCallback(
     (sectionId: string) => {
       updatePage((prev) => {
@@ -760,6 +770,30 @@ export function App() {
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
                           onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
+                          onDelete={() => {
+                            updatePage((prev) => {
+                              const nextSections = prev.sections.map((s) =>
+                                s.id === section.id ? { ...s, components: s.components.filter((c) => c.id !== component.id) } : s
+                              );
+                              return PageSchema.parse({ ...prev, sections: nextSections });
+                            });
+                            setSelected((prevSel) => (prevSel?.componentId === component.id ? null : prevSel));
+                          }}
+                          onDuplicate={() => {
+                            updatePage((prev) => {
+                              const nextSections = prev.sections.map((s) => {
+                                if (s.id !== section.id) return s;
+                                const idx = s.components.findIndex((c) => c.id === component.id);
+                                if (idx < 0) return s;
+                                const copy: Component = { ...s.components[idx]!, id: createId("cmp") };
+                                const next = s.components.slice();
+                                next.splice(idx + 1, 0, copy);
+                                return { ...s, components: next };
+                              });
+                              return PageSchema.parse({ ...prev, sections: nextSections });
+                            });
+                          }}
+                          onUploadImageAssetOnly={uploadImageAssetOnly}
                           onMoveHere={(fromSectionId, fromComponentId) => {
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.id === fromSectionId);
@@ -949,6 +983,7 @@ export function App() {
                   section={selectedSection}
                   component={selectedComponent}
                   imageAssets={imageAssets}
+                  onUploadImageAssetOnly={uploadImageAssetOnly}
                   onSelect={(componentId) => setSelected({ sectionId: selectedSection.id, componentId })}
                   onUpdate={(nextSection) =>
                     updatePage((prev) =>
@@ -980,9 +1015,13 @@ function PreviewComponent(props: {
   isSelected: boolean;
   onSelect: () => void;
   onUpdate: (next: Component) => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
 }) {
-  const { sectionId, component, page, projectId, isSelected, onSelect, onUpdate, onMoveHere } = props;
+  const { sectionId, component, page, projectId, isSelected, onSelect, onUpdate, onDelete, onDuplicate, onUploadImageAssetOnly, onMoveHere } =
+    props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
 
   const dragProps = {
@@ -1030,6 +1069,16 @@ function PreviewComponent(props: {
           onSelect();
         }}
       >
+        {isSelected ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div className="hero" style={heroStyle}>
           <h1
             contentEditable={isSelected}
@@ -1076,6 +1125,14 @@ function PreviewComponent(props: {
           {...dragProps}
           onClick={() => onSelect()}
         >
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+              Delete
+            </button>
+          </div>
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
@@ -1103,6 +1160,16 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
+        {isSelected ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
       </div>
     );
@@ -1118,6 +1185,16 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
+        {isSelected ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div className="contactForm" id="contact">
           <h3
             contentEditable={isSelected}
@@ -1178,6 +1255,32 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
+        {isSelected ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <label className="btn" data-testid="preview-image-replace">
+              Replace
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                data-testid="preview-image-replace-input"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = "";
+                  if (!file) return;
+                  const next = await onUploadImageAssetOnly(file);
+                  onUpdate({ ...component, assetId: next.id });
+                }}
+              />
+            </label>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div className="imageBlock">
           <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} />
           {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
@@ -1226,10 +1329,11 @@ function Inspector(props: {
   section: Section;
   component: Component | null;
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
+  onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onSelect: (componentId: string) => void;
   onUpdate: (next: Section) => void;
 }) {
-  const { section, component, imageAssets, onSelect, onUpdate } = props;
+  const { section, component, imageAssets, onUploadImageAssetOnly, onSelect, onUpdate } = props;
   const [selectedImageAssetId, setSelectedImageAssetId] = useState<string>(imageAssets[0]?.id ?? "");
   const [dragOverComponentId, setDragOverComponentId] = useState<string | null>(null);
 
@@ -1396,6 +1500,7 @@ function Inspector(props: {
           <ComponentFields
             component={component}
             imageAssets={imageAssets}
+            onUploadImageAssetOnly={onUploadImageAssetOnly}
             onUpdate={(next) => updateComponent(section, next, onUpdate)}
           />
         ) : null}
@@ -1415,9 +1520,10 @@ function updateComponent(section: Section, next: Component, onUpdate: (next: Sec
 function ComponentFields(props: {
   component: Component;
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
+  onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onUpdate: (next: Component) => void;
 }) {
-  const { component, imageAssets, onUpdate } = props;
+  const { component, imageAssets, onUploadImageAssetOnly, onUpdate } = props;
 
   if (component.type === "hero") {
     return (
@@ -1489,10 +1595,41 @@ function ComponentFields(props: {
 
   if (component.type === "image") {
     return (
-      <div className="field">
-        <label>Caption</label>
-        <input value={component.caption} onChange={(e) => onUpdate({ ...component, caption: e.target.value })} />
-        <div className="muted">Alt text is stored on the asset (MVP).</div>
+      <div className="stack">
+        <div className="field">
+          <label>Asset</label>
+          <select value={component.assetId} onChange={(e) => onUpdate({ ...component, assetId: e.target.value })}>
+            {imageAssets.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.filename}
+              </option>
+            ))}
+          </select>
+          <div className="muted">Switch which uploaded image is used by this block.</div>
+        </div>
+
+        <div className="field">
+          <label>Replace (upload new)</label>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            data-testid="image-replace-upload"
+            onChange={async (e) => {
+              const file = e.currentTarget.files?.[0];
+              e.currentTarget.value = "";
+              if (!file) return;
+              const asset = await onUploadImageAssetOnly(file);
+              onUpdate({ ...component, assetId: asset.id });
+            }}
+          />
+          <div className="muted">Uploads a new asset and points this image block to it (MVP replace).</div>
+        </div>
+
+        <div className="field">
+          <label>Caption</label>
+          <input value={component.caption} onChange={(e) => onUpdate({ ...component, caption: e.target.value })} />
+          <div className="muted">Alt text is stored on the asset (MVP).</div>
+        </div>
       </div>
     );
   }
