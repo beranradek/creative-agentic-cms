@@ -208,6 +208,21 @@ async function apiExport(projectId: string): Promise<{ outputDir: string }> {
   return { outputDir };
 }
 
+async function apiCaptureScreenshot(projectId: string): Promise<{ screenshotUrl: string }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/preview/screenshot`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ width: 1200, height: 720 }),
+  });
+  const json = (await res.json()) as unknown;
+  if (!res.ok) {
+    const err = (json as { error?: string }).error ?? `Screenshot error (${res.status})`;
+    throw new Error(err);
+  }
+  const screenshotUrl = z.string().parse((json as { screenshotUrl?: unknown }).screenshotUrl);
+  return { screenshotUrl };
+}
+
 async function apiListProjects(): Promise<string[]> {
   const res = await fetch("/api/projects");
   const json = (await res.json()) as unknown;
@@ -232,6 +247,8 @@ export function App() {
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const page = state.kind === "ready" ? state.page : null;
 
@@ -406,6 +423,16 @@ export function App() {
     }
   }, [page, projectId]);
 
+  const captureScreenshot = useCallback(async () => {
+    setIsCapturingScreenshot(true);
+    try {
+      const result = await apiCaptureScreenshot(projectId);
+      setScreenshotUrl(result.screenshotUrl);
+    } finally {
+      setIsCapturingScreenshot(false);
+    }
+  }, [projectId]);
+
   return (
     <div className="shell">
       <div className="panel">
@@ -555,12 +582,31 @@ export function App() {
                 <button className="btn" onClick={() => void exportProject()} disabled={!page || isExporting}>
                   {isExporting ? "Exporting..." : "Export static site"}
                 </button>
+                <button className="btn" onClick={() => void captureScreenshot()} disabled={!page || isCapturingScreenshot}>
+                  {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
+                </button>
               </div>
               {exportInfo ? (
                 <div className="muted">
                   Exported to <code>{exportInfo}</code>
                 </div>
               ) : null}
+              {screenshotUrl ? (
+                <div className="stack" style={{ marginTop: 10 }}>
+                  <div className="muted">
+                    Latest: <code>{screenshotUrl}</code>
+                  </div>
+                  <img
+                    src={screenshotUrl}
+                    alt="Preview screenshot"
+                    style={{ width: "100%", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)" }}
+                  />
+                </div>
+              ) : (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Screenshot capture requires Playwright on the server.
+                </div>
+              )}
             </div>
 
             <div className="card">
