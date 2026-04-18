@@ -79,6 +79,56 @@ Project data is stored locally in `./projects/<projectId>/`:
 - [Node.js](https://nodejs.org/) ≥ 20
 - [pnpm](https://pnpm.io/) ≥ 9
 
+### Installing pnpm (server)
+
+Recommended (uses the version pinned in `package.json#packageManager`):
+
+```bash
+# Node.js 20+ required
+corepack enable
+corepack prepare pnpm@9.15.6 --activate
+
+pnpm -v
+```
+
+### Installing on a server (Ubuntu)
+
+```bash
+git clone git@github.com:beranradek/creative-agentic-cms.git
+cd creative-agentic-cms
+
+corepack enable
+corepack prepare pnpm@9.15.6 --activate
+
+pnpm install
+cp .env.example .env
+# edit .env (set OPENAI_API_KEY, MODEL, etc.)
+
+# Dev (recommended for now)
+pnpm dev
+```
+
+Production-ish (manual):
+
+```bash
+pnpm build
+
+# API server (serves /api + /projects)
+node --env-file=.env packages/server/dist/index.js
+
+# Web build (static files): serve `packages/web/dist/` via nginx/Caddy (or run `pnpm --filter @cac/web preview`)
+```
+
+### Playwright (optional; required for screenshot capture)
+
+The API endpoint `POST /api/projects/:projectId/preview/screenshot` uses Playwright to render and screenshot the exported page.
+
+```bash
+pnpm --filter @cac/server add playwright@1.59.1
+npx playwright install
+# Linux (if needed): npx playwright install-deps
+```
+
 ### Environment Variables
 
 ```bash
