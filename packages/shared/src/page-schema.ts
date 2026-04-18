@@ -43,6 +43,14 @@ export const ImageComponentSchema = z.object({
   type: z.literal("image"),
   assetId: AssetIdSchema,
   caption: z.string().default(""),
+  style: z
+    .object({
+      fit: z.union([z.literal("cover"), z.literal("contain")]).nullable().default(null),
+      maxWidth: z.union([z.literal(480), z.literal(720), z.literal(980)]).nullable().default(null),
+      align: z.union([z.literal("left"), z.literal("center"), z.literal("right")]).nullable().default(null),
+      radius: z.number().int().min(0).max(32).nullable().default(null),
+    })
+    .default({}),
 });
 
 export const ContactFormComponentSchema = z.object({

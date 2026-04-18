@@ -145,7 +145,13 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
   if (component.type === "image") {
     const asset = assetsById.get(component.assetId);
     const file = asset && asset.type === "image" ? asset.filename : "(missing)";
-    return `image: asset=${component.assetId} file=${file} caption="${truncate(component.caption, 80)}"`;
+    const styleParts: string[] = [];
+    if (component.style.fit) styleParts.push(`fit=${component.style.fit}`);
+    if (component.style.align) styleParts.push(`align=${component.style.align}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.radius !== null) styleParts.push(`radius=${component.style.radius}px`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `image: asset=${component.assetId} file=${file}${styleText} caption="${truncate(component.caption, 80)}"`;
   }
   if (component.type === "contact_form") {
     return `contact_form: "${truncate(component.headline, 80)}" submit="${truncate(component.submitLabel, 40)}"`;

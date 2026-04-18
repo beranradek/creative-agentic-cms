@@ -54,7 +54,7 @@ function createComponent(type: Component["type"]): Component {
 }
 
 function createImageComponent(assetId: string): Component {
-  return { id: createId("cmp"), type: "image", assetId, caption: "" };
+  return { id: createId("cmp"), type: "image", assetId, caption: "", style: { fit: null, maxWidth: null, align: null, radius: null } };
 }
 
 function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
@@ -1322,6 +1322,16 @@ function PreviewComponent(props: {
   if (component.type === "image") {
     const asset = page.assets.find((a) => a.type === "image" && a.id === component.assetId);
     if (!asset || asset.type !== "image") return null;
+    const align = component.style.align ?? "center";
+    const blockStyle: React.CSSProperties = {
+      maxWidth: component.style.maxWidth ?? undefined,
+      margin:
+        align === "center" ? "0 auto" : align === "left" ? "0 auto 0 0" : align === "right" ? "0 0 0 auto" : undefined,
+    };
+    const imgStyle: React.CSSProperties = {
+      borderRadius: component.style.radius ?? undefined,
+      objectFit: component.style.fit ?? undefined,
+    };
     return (
       <div
         className={wrapperClass}
@@ -1357,8 +1367,8 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="imageBlock">
-          <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} />
+        <div className="imageBlock" style={blockStyle}>
+          <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} style={imgStyle} />
           {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
         </div>
       </div>
@@ -1805,6 +1815,106 @@ function ComponentFields(props: {
   if (component.type === "image") {
     return (
       <div className="stack">
+        <div className="card">
+          <div className="cardTitle">Image style</div>
+          <div className="stack">
+            <div className="field">
+              <label>Fit</label>
+              <select
+                data-testid="image-style-fit"
+                value={component.style.fit ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    style: { ...component.style, fit: e.target.value === "" ? null : e.target.value === "contain" ? "contain" : "cover" },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                <option value="cover">cover</option>
+                <option value="contain">contain</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Align</label>
+              <select
+                data-testid="image-style-align"
+                value={component.style.align ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    style: {
+                      ...component.style,
+                      align:
+                        e.target.value === "" ? null : e.target.value === "left" ? "left" : e.target.value === "right" ? "right" : "center",
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                <option value="left">left</option>
+                <option value="center">center</option>
+                <option value="right">right</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Max width</label>
+              <select
+                data-testid="image-style-maxwidth"
+                value={component.style.maxWidth ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    style: {
+                      ...component.style,
+                      maxWidth:
+                        e.target.value === ""
+                          ? null
+                          : e.target.value === "480"
+                            ? 480
+                            : e.target.value === "720"
+                              ? 720
+                              : e.target.value === "980"
+                                ? 980
+                                : null,
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                <option value="480">480</option>
+                <option value="720">720</option>
+                <option value="980">980</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Radius</label>
+              <div className="row">
+                <input
+                  data-testid="image-style-radius"
+                  type="range"
+                  min={0}
+                  max={32}
+                  value={component.style.radius ?? 12}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, style: { ...component.style, radius: Number(e.target.value) } })}
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{(component.style.radius ?? 12).toFixed(0)}px</span>
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, radius: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="field">
           <label>Asset</label>
           <select

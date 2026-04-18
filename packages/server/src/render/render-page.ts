@@ -37,9 +37,23 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     if (!asset || asset.type !== "image") return "";
     const filename = asset.filename;
     const alt = asset.alt;
+
+    const figureStyles: string[] = [];
+    if (component.style.maxWidth !== null) figureStyles.push(`max-width:${component.style.maxWidth}px;`);
+    const align = component.style.align ?? "center";
+    if (align === "center") figureStyles.push("margin:0 auto;");
+    if (align === "left") figureStyles.push("margin:0 auto 0 0;");
+    if (align === "right") figureStyles.push("margin:0 0 0 auto;");
+    const figureStyleAttr = figureStyles.length ? ` style="${figureStyles.join("")}"` : "";
+
+    const imgStyles: string[] = [];
+    if (component.style.radius !== null) imgStyles.push(`border-radius:${component.style.radius}px;`);
+    if (component.style.fit !== null) imgStyles.push(`object-fit:${escapeHtml(component.style.fit)};`);
+    const imgStyleAttr = imgStyles.length ? ` style="${imgStyles.join("")}"` : "";
+
     return `
-      <figure class="imageBlock">
-        <img src="assets/${escapeHtml(filename)}" alt="${escapeHtml(alt)}" />
+      <figure class="imageBlock"${figureStyleAttr}>
+        <img src="assets/${escapeHtml(filename)}" alt="${escapeHtml(alt)}"${imgStyleAttr} />
         ${component.caption ? `<figcaption>${escapeHtml(component.caption)}</figcaption>` : ""}
       </figure>
     `;

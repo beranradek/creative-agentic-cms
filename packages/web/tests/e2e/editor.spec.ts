@@ -261,6 +261,47 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   await expect(page.locator(".imageBlock img")).toHaveAttribute("src", afterReplace);
 });
 
+test("image style (radius + max width) persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_img_style_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  const imageItem = page.locator('[data-testid="preview-item"][data-component-type="image"]');
+  await imageItem.click();
+
+  await page.getByTestId("image-style-maxwidth").selectOption("480");
+  await page.getByTestId("image-style-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "20");
+
+  const block = page.locator(".imageBlock").first();
+  const maxWidth = await block.evaluate((el) => getComputedStyle(el).maxWidth);
+  expect(maxWidth).toBe("480px");
+  const radius = await page.locator(".imageBlock img").first().evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+  expect(radius).toBe("20px");
+
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await page.locator('[data-testid="preview-item"][data-component-type="image"]').click();
+  const maxWidthAfter = await block.evaluate((el) => getComputedStyle(el).maxWidth);
+  expect(maxWidthAfter).toBe("480px");
+  const radiusAfter = await page.locator(".imageBlock img").first().evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+  expect(radiusAfter).toBe("20px");
+});
+
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
   test.skip(!process.env.CAC_E2E_SCREENSHOT, "Set CAC_E2E_SCREENSHOT=1 to enable.");
 
