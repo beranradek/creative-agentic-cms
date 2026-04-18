@@ -196,7 +196,9 @@ ${parsed.userMessage}`;
 
     const humanContent = [
       { type: "text", text: userText },
-      ...(parsed.screenshotPngBase64 ? [{ type: "image", source_type: "base64", data: parsed.screenshotPngBase64 }] : []),
+      ...(parsed.screenshotPngBase64
+        ? [{ type: "image", source_type: "base64", mime_type: "image/png", data: parsed.screenshotPngBase64 }]
+        : []),
     ] as unknown as HumanMessage["content"];
 
     const response = await model.invoke([
