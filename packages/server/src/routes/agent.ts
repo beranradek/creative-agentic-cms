@@ -16,7 +16,12 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
 
   router.post("/chat", async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
-    const body = z.object({ message: z.string().min(1) }).parse(req.body);
+    const body = z
+      .object({
+        message: z.string().min(1),
+        screenshotUrl: z.string().min(1).optional(),
+      })
+      .parse(req.body);
 
     let page;
     try {
@@ -30,6 +35,7 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
         userMessage: body.message,
         projectId,
         page,
+        screenshotUrl: body.screenshotUrl,
       });
 
       const nextPage = PageSchema.parse(output.page);

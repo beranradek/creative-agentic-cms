@@ -7,6 +7,7 @@ const AgentInputSchema = z.object({
   userMessage: z.string().min(1),
   projectId: z.string().min(1),
   page: PageSchema,
+  screenshotUrl: z.string().min(1).optional(),
 });
 
 export type AgentInput = z.infer<typeof AgentInputSchema>;
@@ -164,6 +165,9 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
 
 Page snapshot (for fast understanding):
 ${buildPageSnapshot(parsed.page)}
+
+Latest screenshot (for the human user to inspect):
+${parsed.screenshotUrl ?? "(not available)"}
 
 Current page JSON (authoritative, must be edited via schema):
 ${JSON.stringify(parsed.page, null, 2)}

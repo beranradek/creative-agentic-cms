@@ -163,11 +163,15 @@ async function apiPutPage(projectId: string, page: Page): Promise<void> {
   if (!res.ok) throw new Error(`Failed to save page (${res.status})`);
 }
 
-async function apiAgentChat(projectId: string, message: string): Promise<{ assistantMessage: string; page: Page }> {
+async function apiAgentChat(
+  projectId: string,
+  message: string,
+  screenshotUrl?: string
+): Promise<{ assistantMessage: string; page: Page }> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, screenshotUrl }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
@@ -403,7 +407,16 @@ export function App() {
     if (!trimmed) return;
     setIsAgentRunning(true);
     try {
-      const result = await apiAgentChat(projectId, trimmed);
+      let latestScreenshotUrl: string | undefined;
+      try {
+        const shot = await apiCaptureScreenshot(projectId);
+        latestScreenshotUrl = shot.screenshotUrl;
+        setScreenshotUrl(shot.screenshotUrl);
+      } catch {
+        // Best-effort: continue without screenshot (server might not have Playwright installed).
+      }
+
+      const result = await apiAgentChat(projectId, trimmed, latestScreenshotUrl);
       setAgentReply(result.assistantMessage);
       setState({ kind: "ready", page: result.page });
       setSelected(null);
