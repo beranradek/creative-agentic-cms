@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
-import { PageSchema } from "@cac/shared";
+import { PageSchema, type Page, type Asset, type Component } from "@cac/shared";
 import { SimpleCircuitBreaker } from "./circuit-breaker.js";
 
 const AgentInputSchema = z.object({
@@ -20,6 +20,40 @@ export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
 const circuitBreaker = new SimpleCircuitBreaker(3, 30_000);
 
+function collectIds(page: AgentInput["page"]) {
+  const sectionIds = new Set<string>();
+  const componentIds = new Set<string>();
+  const assetIds = new Set<string>();
+
+  for (const section of page.sections) {
+    sectionIds.add(section.id);
+    for (const component of section.components) {
+      componentIds.add(component.id);
+    }
+  }
+
+  for (const asset of page.assets) {
+    assetIds.add(asset.id);
+  }
+
+  return { sectionIds, componentIds, assetIds };
+}
+
+function assertNoImplicitDeletions(prev: AgentInput["page"], next: AgentInput["page"]) {
+  const prevIds = collectIds(prev);
+  const nextIds = collectIds(next);
+
+  const removedSections = [...prevIds.sectionIds].filter((id) => !nextIds.sectionIds.has(id));
+  const removedComponents = [...prevIds.componentIds].filter((id) => !nextIds.componentIds.has(id));
+  const removedAssets = [...prevIds.assetIds].filter((id) => !nextIds.assetIds.has(id));
+
+  if (removedSections.length || removedComponents.length || removedAssets.length) {
+    throw new Error(
+      `Agent removed existing content without explicit permission (sections: ${removedSections.length}, components: ${removedComponents.length}, assets: ${removedAssets.length}). Try again with an explicit delete instruction.`
+    );
+  }
+}
+
 function buildSystemPrompt() {
   return `You are an expert creative CMS editor agent.
 
@@ -36,6 +70,69 @@ Rules:
 - Keep rich_text.html valid, minimal HTML (p, ul, ol, li, strong, em, a).
 - Prefer small, safe changes that satisfy the request.
 `;
+}
+
+function truncate(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return trimmed.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}
+
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<\/?[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildPageSnapshot(page: Page): string {
+  const assetsById = new Map<string, Asset>(page.assets.map((a) => [a.id, a]));
+
+  const lines: string[] = [];
+  lines.push(`Meta: title="${truncate(page.metadata.title, 80)}" lang="${page.metadata.lang}"`);
+  if (page.metadata.description) lines.push(`Meta.description: ${truncate(page.metadata.description, 140)}`);
+  lines.push(`Sections: ${page.sections.length}, Assets: ${page.assets.length}`);
+
+  const imageAssets = page.assets.filter((a) => a.type === "image");
+  if (imageAssets.length) {
+    lines.push("Images:");
+    for (const img of imageAssets.slice(0, 20)) {
+      if (img.type !== "image") continue;
+      lines.push(`- ${img.id} file=${img.filename} alt="${truncate(img.alt, 80)}"`);
+    }
+  }
+
+  lines.push("Structure:");
+  for (const section of page.sections) {
+    lines.push(`- [${section.label}] (${section.id})`);
+    for (const c of section.components) {
+      lines.push("  " + describeComponent(c, assetsById));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function describeComponent(component: Component, assetsById: Map<string, Asset>): string {
+  if (component.type === "hero") {
+    const bg = component.backgroundImageAssetId ? assetsById.get(component.backgroundImageAssetId) : null;
+    const bgText = bg && bg.type === "image" ? ` bg=${bg.filename}` : "";
+    return `hero: "${truncate(component.headline, 80)}" / "${truncate(component.subheadline, 120)}"${bgText}`;
+  }
+  if (component.type === "rich_text") {
+    return `rich_text: "${truncate(stripHtmlToText(component.html), 180)}"`;
+  }
+  if (component.type === "image") {
+    const asset = assetsById.get(component.assetId);
+    const file = asset && asset.type === "image" ? asset.filename : "(missing)";
+    return `image: asset=${component.assetId} file=${file} caption="${truncate(component.caption, 80)}"`;
+  }
+  if (component.type === "contact_form") {
+    return `contact_form: "${truncate(component.headline, 80)}" submit="${truncate(component.submitLabel, 40)}"`;
+  }
+  return component.type;
 }
 
 export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
@@ -63,11 +160,21 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
       { role: "system", content: buildSystemPrompt() },
       {
         role: "user",
-        content: `Project: ${parsed.projectId}\n\nCurrent page JSON:\n${JSON.stringify(parsed.page, null, 2)}\n\nUser request:\n${parsed.userMessage}`,
+        content: `Project: ${parsed.projectId}
+
+Page snapshot (for fast understanding):
+${buildPageSnapshot(parsed.page)}
+
+Current page JSON (authoritative, must be edited via schema):
+${JSON.stringify(parsed.page, null, 2)}
+
+User request:
+${parsed.userMessage}`,
       },
     ]);
 
     const output = AgentOutputSchema.parse(response);
+    assertNoImplicitDeletions(parsed.page, output.page);
     circuitBreaker.onSuccess();
     return output;
   } catch (error) {

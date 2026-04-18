@@ -127,6 +127,25 @@ function sanitizeRichTextHtml(inputHtml: string): string {
   return outWrapper.innerHTML;
 }
 
+type DragPayload =
+  | { kind: "section"; sectionId: string }
+  | { kind: "component"; sectionId: string; componentId: string };
+
+function setDragPayload(e: React.DragEvent, payload: DragPayload) {
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("application/x-cac", JSON.stringify(payload));
+}
+
+function getDragPayload(e: React.DragEvent): DragPayload | null {
+  try {
+    const raw = e.dataTransfer.getData("application/x-cac");
+    if (!raw) return null;
+    return JSON.parse(raw) as DragPayload;
+  } catch {
+    return null;
+  }
+}
+
 async function apiGetPage(projectId: string): Promise<Page> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
   if (!res.ok) throw new Error(`Failed to load page (${res.status})`);
@@ -205,6 +224,7 @@ export function App() {
   const [projects, setProjects] = useState<string[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [agentText, setAgentText] = useState("");
@@ -649,7 +669,36 @@ export function App() {
 
               <div className="list">
                 {page.sections.map((section, idx) => (
-                  <div key={section.id} className="card">
+                  <div
+                    key={section.id}
+                    className="card"
+                    draggable
+                    onDragStart={(e) => setDragPayload(e, { kind: "section", sectionId: section.id })}
+                    onDragOver={(e) => {
+                      const payload = getDragPayload(e);
+                      if (!payload || payload.kind !== "section") return;
+                      e.preventDefault();
+                      setDragOverSectionId(section.id);
+                    }}
+                    onDragLeave={() => setDragOverSectionId((prev) => (prev === section.id ? null : prev))}
+                    onDrop={(e) => {
+                      const payload = getDragPayload(e);
+                      if (!payload || payload.kind !== "section") return;
+                      e.preventDefault();
+                      setDragOverSectionId(null);
+                      if (payload.sectionId === section.id) return;
+                      updatePage((prev) => {
+                        const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
+                        const toIndex = prev.sections.findIndex((s) => s.id === section.id);
+                        return PageSchema.parse({ ...prev, sections: moveInArray(prev.sections, fromIndex, toIndex) });
+                      });
+                    }}
+                    style={
+                      dragOverSectionId === section.id
+                        ? { outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2 }
+                        : undefined
+                    }
+                  >
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="cardTitle">{section.label}</div>
                       <div className="row">
@@ -831,6 +880,7 @@ function Inspector(props: {
 }) {
   const { section, component, imageAssets, onSelect, onUpdate } = props;
   const [selectedImageAssetId, setSelectedImageAssetId] = useState<string>(imageAssets[0]?.id ?? "");
+  const [dragOverComponentId, setDragOverComponentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (imageAssets.length === 0) {
@@ -923,10 +973,49 @@ function Inspector(props: {
 
         <div className="list">
           {section.components.map((c, idx) => (
-            <div key={c.id} className="row" style={{ justifyContent: "space-between" }}>
-              <button className="btn" onClick={() => onSelect(c.id)}>
-                {c.type}
-              </button>
+            <div
+              key={c.id}
+              className="row"
+              style={
+                dragOverComponentId === c.id
+                  ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
+                  : { justifyContent: "space-between" }
+              }
+              onDragOver={(e) => {
+                const payload = getDragPayload(e);
+                if (!payload || payload.kind !== "component") return;
+                if (payload.sectionId !== section.id) return;
+                e.preventDefault();
+                setDragOverComponentId(c.id);
+              }}
+              onDragLeave={() => setDragOverComponentId((prev) => (prev === c.id ? null : prev))}
+              onDrop={(e) => {
+                const payload = getDragPayload(e);
+                if (!payload || payload.kind !== "component") return;
+                if (payload.sectionId !== section.id) return;
+                e.preventDefault();
+                setDragOverComponentId(null);
+                if (payload.componentId === c.id) return;
+                const fromIndex = section.components.findIndex((x) => x.id === payload.componentId);
+                const toIndex = section.components.findIndex((x) => x.id === c.id);
+                if (fromIndex < 0 || toIndex < 0) return;
+                onUpdate({ ...section, components: moveInArray(section.components, fromIndex, toIndex) });
+              }}
+            >
+              <div className="row" style={{ gap: 8 }}>
+                <span
+                  className="dragHandle"
+                  draggable
+                  title="Drag to reorder"
+                  onDragStart={(e) => setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id })}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ⋮⋮
+                </span>
+                <button className="btn" onClick={() => onSelect(c.id)}>
+                  {c.type}
+                </button>
+              </div>
               <div className="row">
                 <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={idx === 0}>
                   ↑
