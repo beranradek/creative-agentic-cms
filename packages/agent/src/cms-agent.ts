@@ -118,6 +118,10 @@ function buildPageSnapshot(page: Page): string {
   return lines.join("\n");
 }
 
+function assertNever(value: never): never {
+  throw new Error(`Unhandled component type: ${JSON.stringify(value)}`);
+}
+
 function describeComponent(component: Component, assetsById: Map<string, Asset>): string {
   if (component.type === "hero") {
     const bg = component.backgroundImageAssetId ? assetsById.get(component.backgroundImageAssetId) : null;
@@ -135,7 +139,7 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
   if (component.type === "contact_form") {
     return `contact_form: "${truncate(component.headline, 80)}" submit="${truncate(component.submitLabel, 40)}"`;
   }
-  return component.type;
+  return assertNever(component);
 }
 
 export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {

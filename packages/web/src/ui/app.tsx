@@ -197,6 +197,52 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   return AssetSchema.parse(asset);
 }
 
+async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("canvas.toBlob returned null"));
+          return;
+        }
+        resolve(blob);
+      },
+      type,
+      quality
+    );
+  });
+}
+
+async function downscaleImageFile(file: File, maxDimensionPx: number): Promise<File> {
+  if (!Number.isFinite(maxDimensionPx) || maxDimensionPx <= 0) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const maxDim = Math.max(bitmap.width, bitmap.height);
+  if (maxDim <= maxDimensionPx) return file;
+
+  const scale = maxDimensionPx / maxDim;
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  const blob =
+    (await canvasToBlob(canvas, "image/webp", 0.9).catch(() => null)) ??
+    (await canvasToBlob(canvas, file.type || "image/png", 0.9).catch(() => null)) ??
+    (await canvasToBlob(canvas, "image/png"));
+
+  const outExt = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
+  const outName = file.name.replace(/\.[^.]+$/, "") + `.${outExt}`;
+
+  return new File([blob], outName, { type: blob.type });
+}
+
 async function apiExport(projectId: string): Promise<{ outputDir: string }> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
     method: "POST",
@@ -252,6 +298,8 @@ export function App() {
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [optimizeUploads, setOptimizeUploads] = useState(true);
+  const [maxUploadPx, setMaxUploadPx] = useState(1600);
   const [agentText, setAgentText] = useState("");
   const [agentReply, setAgentReply] = useState<string | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
@@ -379,7 +427,8 @@ export function App() {
     if (!file) return;
     input.value = "";
 
-    const asset = await apiUploadImage(projectId, file);
+    const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
+    const asset = await apiUploadImage(projectId, toUpload);
     updatePage((prev) => {
       const next = PageSchema.parse({
         ...prev,
@@ -394,7 +443,7 @@ export function App() {
       });
       return next;
     });
-  }, [page, projectId, updatePage]);
+  }, [page, projectId, updatePage, optimizeUploads, maxUploadPx]);
 
   const removeSection = useCallback(
     (sectionId: string) => {
@@ -523,6 +572,24 @@ export function App() {
 
             <div className="card">
               <div className="cardTitle">Images</div>
+              <div className="row" style={{ alignItems: "flex-end" }}>
+                <label className="row" style={{ gap: 8, alignItems: "center", flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={optimizeUploads}
+                    onChange={(e) => setOptimizeUploads(e.target.checked)}
+                  />
+                  <span className="muted">Optimize (downscale)</span>
+                </label>
+                <div className="field" style={{ width: 120 }}>
+                  <label>Max px</label>
+                  <input
+                    value={String(maxUploadPx)}
+                    onChange={(e) => setMaxUploadPx(Number(e.target.value || "0"))}
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -682,12 +749,25 @@ export function App() {
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
+                          sectionId={section.id}
                           component={component}
                           page={page}
                           projectId={projectId}
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
                           onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
+                          onMoveHere={(fromComponentId) =>
+                            updatePage((prev) => {
+                              const nextSections = prev.sections.map((s) => {
+                                if (s.id !== section.id) return s;
+                                const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
+                                const toIndex = s.components.findIndex((c) => c.id === component.id);
+                                if (fromIndex < 0 || toIndex < 0) return s;
+                                return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
+                              });
+                              return PageSchema.parse({ ...prev, sections: nextSections });
+                            })
+                          }
                         />
                       ))}
                     </div>
@@ -827,15 +907,36 @@ export function App() {
 }
 
 function PreviewComponent(props: {
+  sectionId: string;
   component: Component;
   page: Page;
   projectId: string;
   isSelected: boolean;
   onSelect: () => void;
   onUpdate: (next: Component) => void;
+  onMoveHere: (fromComponentId: string) => void;
 }) {
-  const { component, page, projectId, isSelected, onSelect, onUpdate } = props;
+  const { sectionId, component, page, projectId, isSelected, onSelect, onUpdate, onMoveHere } = props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
+
+  const dragProps = {
+    draggable: !isSelected,
+    onDragStart: (e: React.DragEvent) => setDragPayload(e, { kind: "component", sectionId, componentId: component.id }),
+    onDragOver: (e: React.DragEvent) => {
+      const payload = getDragPayload(e);
+      if (!payload || payload.kind !== "component") return;
+      if (payload.sectionId !== sectionId) return;
+      e.preventDefault();
+    },
+    onDrop: (e: React.DragEvent) => {
+      const payload = getDragPayload(e);
+      if (!payload || payload.kind !== "component") return;
+      if (payload.sectionId !== sectionId) return;
+      e.preventDefault();
+      if (payload.componentId === component.id) return;
+      onMoveHere(payload.componentId);
+    },
+  };
   if (component.type === "hero") {
     const bgAsset =
       component.backgroundImageAssetId ? page.assets.find((a) => a.type === "image" && a.id === component.backgroundImageAssetId) : null;
@@ -859,6 +960,7 @@ function PreviewComponent(props: {
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
+        {...dragProps}
         onClick={(e) => {
           e.preventDefault();
           onSelect();
@@ -883,6 +985,7 @@ function PreviewComponent(props: {
           data-testid="preview-item"
           data-component-id={component.id}
           data-component-type={component.type}
+          {...dragProps}
           onClick={() => onSelect()}
         >
           <div
@@ -909,6 +1012,7 @@ function PreviewComponent(props: {
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
+        {...dragProps}
         onClick={() => onSelect()}
       >
         <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
@@ -923,6 +1027,7 @@ function PreviewComponent(props: {
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
+        {...dragProps}
         onClick={() => onSelect()}
       >
         <div className="contactForm" id="contact">
@@ -958,6 +1063,7 @@ function PreviewComponent(props: {
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
+        {...dragProps}
         onClick={() => onSelect()}
       >
         <div className="imageBlock">

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@cac/shared": "workspace:*",
+    "@langchain/core": "1.1.40",
     "@langchain/openai": "1.4.4",
     "zod": "3.25.76"
   },

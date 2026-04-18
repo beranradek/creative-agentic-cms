@@ -51,6 +51,32 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   expect(types[1]).toBe("hero");
 });
 
+test("components can be reordered via drag and drop in Preview (within a section)", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_reorder_${Date.now()}`;
+  await page.getByTestId("project-id").fill(projectId);
+  await page.getByTestId("project-load").click();
+
+  await page.getByTestId("add-hero").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Text" }).click();
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  await expect(hero).toHaveCount(1);
+  await expect(text).toHaveCount(1);
+
+  await text.dragTo(hero);
+
+  const types = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types[0]).toBe("rich_text");
+});
+
 test("rich text can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 
