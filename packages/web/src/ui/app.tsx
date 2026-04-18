@@ -212,11 +212,17 @@ async function apiExport(projectId: string): Promise<{ outputDir: string }> {
   return { outputDir };
 }
 
-async function apiCaptureScreenshot(projectId: string): Promise<{ screenshotUrl: string }> {
+async function apiCaptureScreenshot(
+  projectId: string,
+  options?: { width?: number; height?: number; fullPage?: boolean }
+): Promise<{ screenshotUrl: string }> {
+  const width = options?.width ?? 1024;
+  const height = options?.height ?? 768;
+  const fullPage = options?.fullPage ?? false;
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/preview/screenshot`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ width: 1024, height: 768, fullPage: false }),
+    body: JSON.stringify({ width, height, fullPage }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
@@ -409,7 +415,7 @@ export function App() {
     try {
       let latestScreenshotUrl: string | undefined;
       try {
-        const shot = await apiCaptureScreenshot(projectId);
+        const shot = await apiCaptureScreenshot(projectId, { width: 1024, height: 768, fullPage: false });
         latestScreenshotUrl = shot.screenshotUrl;
         setScreenshotUrl(shot.screenshotUrl);
       } catch {
@@ -439,7 +445,7 @@ export function App() {
   const captureScreenshot = useCallback(async () => {
     setIsCapturingScreenshot(true);
     try {
-      const result = await apiCaptureScreenshot(projectId);
+      const result = await apiCaptureScreenshot(projectId, { width: 1200, height: 720, fullPage: true });
       setScreenshotUrl(result.screenshotUrl);
     } finally {
       setIsCapturingScreenshot(false);
