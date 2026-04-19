@@ -12,15 +12,13 @@ This file governs how the Autofactory operates on this repository. It is read by
 
 The triage workflow reads MISSION.md, this file, and the open untriaged issues, then labels each issue as `factory:accepted`, `factory:rejected`, or `factory:needs-human`.
 
+Scope boundaries for this repo (what is and isn't a feature CAC supports) live in `MISSION.md`. This section covers only the *process* criteria for accepting, rejecting, or deferring an issue — it does not restate scope.
+
 ### Accept (label `factory:accepted` + a priority label)
 
+- Feature requests that fit MISSION.md "Core Capabilities (In Scope)" or "Allowed Evolutions"
 - Bug reports with clear reproduction steps, expected vs. actual behavior, or error messages
-- Feature requests that align with MISSION.md "Core Capabilities (In Scope)" or "Allowed Evolutions"
-- Performance / Page Speed improvements with a measurable claim (metrics, profiling evidence)
-- SEO / GEO markup improvements for produced output
-- Improvements to the AI agent's context construction, prompts, or use of ChromeDev MCP / screenshots
-- Image editor improvements (upload, resize, crop, placement, re-edit) and AI image generation flow improvements
-- Builder palette, component library, and insite editing UX improvements
+- Performance / Page Speed / SEO / GEO improvements with a measurable claim (metrics, profiling evidence)
 - Documentation improvements and typo fixes
 - Refactoring proposals that clearly improve a specific pain point without expanding scope
 - Test additions for existing uncovered editor behavior (unit, integration, or E2E with browser automation)
@@ -29,12 +27,7 @@ The triage workflow reads MISSION.md, this file, and the open untriaged issues, 
 ### Reject (label `factory:rejected`, close with comment)
 
 - Anything listed in MISSION.md "Out of Scope (Factory Must Never Build)"
-- Anything that would modify a MISSION.md "Hard Invariant" (see section 10)
-- Proposals to introduce a database, ORM, or any persistent store beyond the local filesystem layout
-- Proposals to add user accounts, login flows, roles, SSO, or any authentication surface to the product
-- Proposals to swap the LLM provider away from OpenAI or add alternative providers as user-selectable options
-- Proposals to add commercial-licensed libraries
-- Proposals to turn the editor into a multi-page / multi-tenant / headless-CMS product
+- Anything that would modify a MISSION.md "Hard Invariant"
 - Questions masquerading as issues ("how do I…", "is it possible to…") — reject with a helpful pointer to README.md
 - "Rewrite in X" proposals, framework swaps, major architectural changes without justification
 - Duplicates of other open issues (close pointing at the original)
@@ -71,15 +64,13 @@ These apply to any implementation workflow operating on this repo.
 
 ### Absolute prohibitions
 
-1. **Never modify test files to make tests pass.** If a test fails, fix the source code. If the test itself is wrong, the PR must explicitly call this out in the body and explain why — and that claim will be scrutinized by the validator.
-2. **Never modify the protected files** listed in section 5. Any PR that touches them is auto-rejected.
-3. **Never add new package dependencies without strong justification.** New dependencies require a PR-body section explaining: (a) what it does, (b) why existing dependencies don't work, (c) that the license is **not** commercial, (d) evidence of active maintenance (recent commits, reasonable star count, no known CVEs). The security-check step scrutinizes every new dependency.
-4. **Never declare success without running the full validation suite.** See section 3.
-5. **Never add features, refactor, or "improve" code beyond what the linked issue specifies.** Fix the bug the issue describes. Build the feature the issue requests. Nothing else.
-6. **Never commit secrets, API keys, tokens, or `.env` files.** See section 5.
-7. **Never introduce a database, ORM, or persistent store.** The MVP is filesystem-only (MISSION.md hard invariant 1).
-8. **Never add authentication / user accounts / role systems to the product.** (MISSION.md hard invariant 4.)
-9. **Never swap or add LLM providers.** OpenAI via `@langchain/openai` is the only provider. (MISSION.md hard invariant 3.)
+1. **Never violate a MISSION.md "Hard Invariant".** Invariants define what CAC is — any PR that contradicts one is an auto-reject (see section 6).
+2. **Never modify test files to make tests pass.** If a test fails, fix the source code. If the test itself is wrong, the PR must explicitly call this out in the body and explain why — and that claim will be scrutinized by the validator.
+3. **Never modify the protected files** listed in section 5. Any PR that touches them is auto-rejected.
+4. **Never add new package dependencies without strong justification.** New dependencies require a PR-body section explaining: (a) what it does, (b) why existing dependencies don't work, (c) that the license is **not** commercial (per MISSION.md invariants), (d) evidence of active maintenance (recent commits, reasonable star count, no known CVEs). The security-check step scrutinizes every new dependency.
+5. **Never declare success without running the full validation suite.** See section 3.
+6. **Never add features, refactor, or "improve" code beyond what the linked issue specifies.** Fix the bug the issue describes. Build the feature the issue requests. Nothing else.
+7. **Never commit secrets, API keys, tokens, or `.env` files.** See section 5.
 
 ### Requirements for every PR
 
@@ -104,7 +95,7 @@ The validator auto-merges a PR only when **every** gate below is true. Missing a
 7. **Protected files untouched** — see section 5.
 8. **PR size within 500 lines.**
 9. **Fix-attempt count ≤ 2.** If this is the third validation cycle on the same PR, the PR is escalated instead of fixed again.
-10. **No MISSION.md hard invariants modified.** See section 10.
+10. **No MISSION.md Hard Invariants violated.** See section 6 and MISSION.md.
 
 Auto-merge mechanism: `gh pr review --approve` followed by `gh pr merge --squash --auto --delete-branch`. Squash merges only — clean history, easy rollback.
 
@@ -183,13 +174,10 @@ If the factory needs to touch any of these files to solve an issue, that issue i
 Some validation failures are fundamental and cannot be fixed incrementally. When any of these is detected, the PR is **rejected outright**, not sent back for fixes. The linked issue is reopened and re-queued for a fresh implementation attempt.
 
 1. **Any modification to a protected file** (section 5)
-2. **Security check finds a critical or high severity finding** — hardcoded secrets, command injection, path traversal outside the project directory, SSRF, dependency vulnerabilities, any auth bypass in code that is supposed to be protective
-3. **Any change that introduces a database, ORM, or persistent store** (contradicts MISSION.md hard invariant 1)
-4. **Any change that adds authentication / user accounts / role systems to the product** (contradicts MISSION.md hard invariant 4)
-5. **Any change that adds a new LLM provider, swaps `@langchain/openai` for another SDK, or adds local/self-hosted model support** (contradicts MISSION.md hard invariant 3)
-6. **Any change that introduces a commercial-licensed dependency**
-7. **Any change whose primary effect is to modify tests to make them pass** (as opposed to fixing source code)
-8. **Scope is wildly wrong** — the diff has no causal relationship to the linked issue, or the PR implements something substantially different from what the issue asked for
+2. **Any change that violates a MISSION.md "Hard Invariant"** — see MISSION.md for the authoritative list (e.g. introducing a database, adding auth, swapping the LLM provider, introducing a commercial-licensed dependency, expanding past single-page scope, modifying governance files)
+3. **Security check finds a critical or high severity finding** — hardcoded secrets, command injection, path traversal outside the project directory, SSRF, dependency vulnerabilities, any auth bypass in code that is supposed to be protective
+4. **Any change whose primary effect is to modify tests to make them pass** (as opposed to fixing source code)
+5. **Scope is wildly wrong** — the diff has no causal relationship to the linked issue, or the PR implements something substantially different from what the issue asked for
 
 When a PR is auto-rejected, the validator posts a clear comment explaining which rule triggered the rejection and closes the PR. The linked issue gets a comment noting the rejection and is re-labeled for another attempt.
 
@@ -266,16 +254,9 @@ Workflows share state **only** through GitHub labels and PR/issue comments. Ther
 
 ---
 
-## 10. Hard Invariants Referenced From MISSION.md
+## 10. Hard Invariants
 
-These are restated here so every workflow sees them in operational context. They cannot be changed by any factory-processed issue. A PR that attempts to modify any of these is auto-rejected under section 6.
-
-1. **Filesystem-only storage.** No database, no ORM, no persistent store beyond `./projects/<projectId>/` on the local filesystem.
-2. **Single-page per project.** Multi-page site-builder functionality is not something the factory can add.
-3. **OpenAI is the only LLM provider.** Direct via `@langchain/openai`, circuit-broken. No alternatives.
-4. **No product-level authentication.** No accounts, logins, or roles added to the editor.
-5. **No commercial-licensed dependencies.**
-6. **Governance files cannot be modified by the factory.** `MISSION.md`, `FACTORY_RULES.md`, `CLAUDE.md`.
+Hard Invariants are defined in MISSION.md § "Hard Invariants (Not Tunable by Factory Issues)" and are the authoritative list. They cannot be changed by any factory-processed issue. Any PR that violates one is auto-rejected under section 6. Do not restate them here — if they change, they change in MISSION.md.
 
 ---
 
