@@ -151,6 +151,10 @@ pnpm install
 # All packages
 pnpm test
 
+# TypeScript checks
+pnpm typecheck
+pnpm lint
+
 # E2E (Playwright)
 pnpm --filter @cac/web exec playwright install
 # Linux (if needed): pnpm --filter @cac/web exec playwright install-deps

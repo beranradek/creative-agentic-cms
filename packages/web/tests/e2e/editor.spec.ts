@@ -353,6 +353,62 @@ test("image style (radius + max width) persists", async ({ page }) => {
   expect(radiusAfter).toBe("20px");
 });
 
+test("exported HTML includes section + image styles", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_export_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await ensurePaletteTab(page, "images");
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByTestId("section-bg").fill("#ff0000");
+  await page.getByTestId("section-padding").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "24");
+
+  const imageItem = page.locator('[data-testid="preview-item"][data-component-type="image"]');
+  await imageItem.click();
+  await page.getByTestId("image-style-maxwidth").selectOption("480");
+  await page.getByTestId("image-style-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "20");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await expect(page.getByTestId("save-page")).toBeEnabled();
+  await expect(page.getByTestId("save-page")).toHaveText("Save page.json");
+  await page.getByTestId("export-site").click();
+
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).toContain('background:#ff0000;');
+  expect(html).toContain('padding:24px;');
+  expect(html).toContain('max-width:480px;');
+  expect(html).toContain('border-radius:20px;');
+});
+
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
   test.skip(!process.env.CAC_E2E_SCREENSHOT, "Set CAC_E2E_SCREENSHOT=1 to enable.");
 

@@ -9,6 +9,7 @@ import {
   type Section,
 } from "@cac/shared";
 import { isSttSupported, startStt, stopStt } from "./stt.js";
+import { useToast } from "./toast.js";
 
 type LoadState =
   | { kind: "idle" }
@@ -344,6 +345,7 @@ async function apiListProjects(): Promise<string[]> {
 }
 
 export function App() {
+  const toast = useToast();
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
   const [loadedProjectId, setLoadedProjectId] = useState(DEFAULT_PROJECT_ID);
   const [state, setState] = useState<LoadState>({ kind: "idle" });
@@ -355,6 +357,7 @@ export function App() {
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
   const [agentText, setAgentText] = useState("");
@@ -371,11 +374,14 @@ export function App() {
   const sttBaseRef = useRef<string>("");
   const sttFinalRef = useRef<string>("");
   const [agentReply, setAgentReply] = useState<string | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  const [screenshotError, setScreenshotError] = useState<string | null>(null);
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const page = state.kind === "ready" ? state.page : null;
@@ -404,11 +410,13 @@ export function App() {
       const next = await apiListProjects();
       setProjects(next);
     } catch (error) {
-      setProjectsError(error instanceof Error ? error.message : "Unknown error");
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setProjectsError(message);
+      toast.error("Failed to load projects", message);
     } finally {
       setIsProjectsLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   const load = useCallback(async (projectIdOverride?: string) => {
     const effectiveProjectId = projectIdOverride ?? projectId;
@@ -421,9 +429,11 @@ export function App() {
       setSelected(null);
       void refreshProjects();
     } catch (error) {
-      setState({ kind: "error", message: error instanceof Error ? error.message : "Unknown error" });
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setState({ kind: "error", message });
+      toast.error("Failed to load project", message);
     }
-  }, [projectId, refreshProjects]);
+  }, [projectId, refreshProjects, toast]);
 
   useEffect(() => {
     void load();
@@ -436,12 +446,18 @@ export function App() {
   const save = useCallback(async () => {
     if (!page) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
       await apiPutPage(projectId, page);
+      toast.success("Saved", `projects/${projectId}/page.json`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setSaveError(message);
+      toast.error("Save failed", message);
     } finally {
       setIsSaving(false);
     }
-  }, [page, projectId]);
+  }, [page, projectId, toast]);
 
   const updatePage = useCallback((updater: (prev: Page) => Page) => {
     setState((prev) => {
@@ -624,6 +640,7 @@ export function App() {
     if (!trimmed) return;
     if (isSttActive) stopAgentStt();
     setIsAgentRunning(true);
+    setAgentError(null);
     try {
       let latestScreenshotUrl: string | undefined;
       try {
@@ -638,31 +655,48 @@ export function App() {
       setAgentReply(result.assistantMessage);
       setState({ kind: "ready", page: result.page });
       setSelected(null);
+      toast.success("Agent applied changes");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setAgentError(message);
+      toast.error("Agent failed", message);
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt]);
+  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt, toast]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
     setIsExporting(true);
+    setExportError(null);
     try {
       const result = await apiExport(activeProjectId);
       setExportInfo(result.outputDir);
+      toast.success("Exported", result.outputDir);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setExportError(message);
+      toast.error("Export failed", message);
     } finally {
       setIsExporting(false);
     }
-  }, [activeProjectId, page]);
+  }, [activeProjectId, page, toast]);
 
   const captureScreenshot = useCallback(async () => {
     setIsCapturingScreenshot(true);
+    setScreenshotError(null);
     try {
       const result = await apiCaptureScreenshot(activeProjectId, { width: 1200, height: 720, fullPage: true });
       setScreenshotUrl(result.screenshotUrl);
+      toast.success("Screenshot captured");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setScreenshotError(message);
+      toast.error("Screenshot failed", message);
     } finally {
       setIsCapturingScreenshot(false);
     }
-  }, [activeProjectId]);
+  }, [activeProjectId, toast]);
 
   const openPaletteTab = useCallback((tab: PaletteTab) => {
     setPaletteTab((current) => {
@@ -798,7 +832,18 @@ export function App() {
                             {isProjectsLoading ? "Refreshing..." : "Refresh"}
                           </button>
                         </div>
-                        {projectsError ? <div className="muted">Failed to load projects: {projectsError}</div> : null}
+                        {state.kind === "error" ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Load error</div>
+                            <div>{state.message}</div>
+                          </div>
+                        ) : null}
+                        {projectsError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Projects error</div>
+                            <div>{projectsError}</div>
+                          </div>
+                        ) : null}
                         {projects.length ? (
                           <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
                             {projects.map((p) => (
@@ -834,25 +879,48 @@ export function App() {
                             Reload
                           </button>
                         </div>
+                        {saveError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Save error</div>
+                            <div>{saveError}</div>
+                          </div>
+                        ) : null}
                         <div className="muted">
                           Writes to <code>projects/&lt;projectId&gt;/page.json</code>.
                         </div>
                         <div className="row" style={{ marginTop: 10 }}>
-                          <button className="btn" onClick={() => void exportProject()} disabled={!page || isExporting}>
+                          <button
+                            className="btn"
+                            data-testid="export-site"
+                            onClick={() => void exportProject()}
+                            disabled={!page || isExporting || isSaving}
+                          >
                             {isExporting ? "Exporting..." : "Export static site"}
                           </button>
                           <button
                             className="btn"
                             data-testid="capture-screenshot"
                             onClick={() => void captureScreenshot()}
-                            disabled={!page || isCapturingScreenshot}
+                            disabled={!page || isCapturingScreenshot || isSaving}
                           >
                             {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
                           </button>
                         </div>
+                        {exportError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Export error</div>
+                            <div>{exportError}</div>
+                          </div>
+                        ) : null}
+                        {screenshotError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Screenshot error</div>
+                            <div>{screenshotError}</div>
+                          </div>
+                        ) : null}
                         {exportInfo ? (
                           <div className="muted">
-                            Exported to <code>{exportInfo}</code>
+                            Exported to <code data-testid="export-output-dir">{exportInfo}</code>
                           </div>
                         ) : null}
                         {screenshotUrl ? (
@@ -921,7 +989,12 @@ export function App() {
                             {sttInterim ? <span className="badge">listening…</span> : null}
                           </div>
                         </div>
-                        {sttError ? <div className="muted">Mic error: {sttError}</div> : null}
+                        {sttError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Mic error</div>
+                            <div>{sttError}</div>
+                          </div>
+                        ) : null}
                       </div>
                       <div className="row">
                         <button
@@ -936,6 +1009,12 @@ export function App() {
                           Clear reply
                         </button>
                       </div>
+                      {agentError ? (
+                        <div className="errorBox" style={{ marginTop: 10 }}>
+                          <div className="errorBoxTitle">Agent error</div>
+                          <div>{agentError}</div>
+                        </div>
+                      ) : null}
                       {agentReply ? <div className="muted">{agentReply}</div> : <div className="muted">Uses `OPENAI_API_KEY` from `.env`.</div>}
                     </div>
                   ) : null}

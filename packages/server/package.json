@@ -8,6 +8,8 @@
     "build:watch": "tsc -p tsconfig.json -w --preserveWatchOutput",
     "dev:serve": "node --env-file=../../.env --watch dist/index.js",
     "dev": "pnpm run dev:serve",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "pnpm run typecheck",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

@@ -68,7 +68,10 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
         res.status(503).json({ error: "LLM temporarily unavailable", openUntilMs: error.openUntilMs });
         return;
       }
-      res.status(500).json({ error: error instanceof Error ? error.message : "Unknown error" });
+      console.error(`[agent] /chat failed for projectId=${projectId}`, error);
+      res.status(500).json({
+        error: "Agent request failed. Verify OPENAI_API_KEY/MODEL and check server logs for details.",
+      });
     }
   });
 
