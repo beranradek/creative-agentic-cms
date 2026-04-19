@@ -51,6 +51,7 @@ MUST READ for additional info - inspiration:
 - https://www.storyblok.com/docs/manuals/image-editor
 - All images in docs/examples
 - docs/examples/langchain-agent - example of LangChain agent abstractions to use
+- docs/examples/imagegen - reference implementation of AI image generation (OpenAI `gpt-image-1`) extracted from the ArtBeams CMS. Includes backend service + controller, reusable async-job plumbing (job manager, executor, polling responses), the OpenAI client config, and the full UI layer (vanilla JS client `image-agent.js`, styles `image-agent.css`, host template `chat.ftl`). Blueprint for the generate → temp preview → save-to-gallery flow with per-session rate limiting, TTL temp cache, and friendly error mapping. See `docs/examples/imagegen/README.md` for what to copy as-is vs. what to rewrite idiomatically in Node/TypeScript.
 
 The editor capabilities MUST BE END-TO-END TESTED during the implementation using the browser automation tools
 (clicking, scrolling, resizing, filling, typing, mouse moving like a human, taking screenshots),
