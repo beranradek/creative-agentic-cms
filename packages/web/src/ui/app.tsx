@@ -1554,10 +1554,10 @@ function PreviewComponent(props: {
     const heroStyle =
       bgAsset && bgAsset.type === "image"
         ? {
-            backgroundImage: [
-              "radial-gradient(900px 380px at 15% 15%, rgba(124, 92, 255, 0.35), transparent 60%)",
-              "radial-gradient(900px 380px at 70% 20%, rgba(34, 211, 238, 0.2), transparent 60%)",
-              "linear-gradient(180deg, rgba(0,0,0,0.60), rgba(0,0,0,0.20))",
+          backgroundImage: [
+              "radial-gradient(900px 380px at 15% 15%, rgba(37, 99, 235, 0.10), transparent 62%)",
+              "radial-gradient(900px 380px at 70% 20%, rgba(6, 182, 212, 0.08), transparent 62%)",
+              "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.92))",
               `url(/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(bgAsset.filename)})`,
             ].join(", "),
             backgroundSize: ["auto", "auto", "cover", "cover"].join(", "),

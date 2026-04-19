@@ -17,7 +17,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
         : null;
     const style =
       bgAsset && bgAsset.type === "image"
-        ? ` style="background-image: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), linear-gradient(180deg, rgba(0,0,0,0.60), rgba(0,0,0,0.20)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;"`
+        ? ` style="background-image: radial-gradient(900px 380px at 15% 15%, rgba(37,99,235,0.10), transparent 62%), radial-gradient(900px 380px at 70% 20%, rgba(6,182,212,0.08), transparent 62%), linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.92)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;"`
         : "";
     return `
       <div class="hero"${style}>
@@ -52,31 +52,31 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const imgStyleAttr = imgStyles.length ? ` style="${imgStyles.join("")}"` : "";
 
     return `
-      <figure class="imageBlock"${figureStyleAttr}>
+      <div class="imageBlock"${figureStyleAttr}>
         <img src="assets/${escapeHtml(filename)}" alt="${escapeHtml(alt)}"${imgStyleAttr} />
-        ${component.caption ? `<figcaption>${escapeHtml(component.caption)}</figcaption>` : ""}
-      </figure>
+        ${component.caption ? `<div class="imageCaption">${escapeHtml(component.caption)}</div>` : ""}
+      </div>
     `;
   }
 
   if (component.type === "contact_form") {
     return `
       <div class="contactForm" id="contact">
-        <h2>${escapeHtml(component.headline)}</h2>
-        <form method="post" action="#">
-          <label>
-            <span>Name</span>
+        <h3>${escapeHtml(component.headline)}</h3>
+        <form method="post" action="#" onsubmit="return false;">
+          <div class="field">
+            <label>Name</label>
             <input name="name" />
-          </label>
-          <label>
-            <span>Email</span>
+          </div>
+          <div class="field">
+            <label>Email</label>
             <input name="email" />
-          </label>
-          <label>
-            <span>Message</span>
-            <textarea name="message" rows="5"></textarea>
-          </label>
-          <button type="submit">${escapeHtml(component.submitLabel)}</button>
+          </div>
+          <div class="field">
+            <label>Message</label>
+            <textarea name="message" rows="4"></textarea>
+          </div>
+          <button class="btn btnPrimary" type="submit">${escapeHtml(component.submitLabel)}</button>
         </form>
       </div>
     `;
@@ -102,25 +102,30 @@ ${inner}
 
 export function renderPageHtml(page: Page): { html: string; css: string } {
   const css = `
-    :root { color-scheme: light; --bg:#0b0d12; --text:#e8eefc; --muted:#a7b3d6; --line:rgba(255,255,255,0.12); --accent:#7c5cff; }
+    :root { color-scheme: light; --bg:#f4f6fb; --panel:#ffffff; --text:#0f172a; --muted:#64748b; --line:rgba(15,23,42,0.10); --accent:#2563eb; }
     html,body { height:100%; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 15% 10%, rgba(124,92,255,0.35), transparent 55%), radial-gradient(900px 500px at 70% 20%, rgba(34,211,238,0.22), transparent 55%), var(--bg); color: var(--text); }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 15% 10%, rgba(37,99,235,0.10), transparent 58%), radial-gradient(900px 500px at 70% 20%, rgba(6,182,212,0.08), transparent 58%), var(--bg); color: var(--text); }
     .container { max-width: none; margin: 0 auto; padding: 32px 16px; display:flex; flex-direction:column; gap: 18px; }
-    .section { width: 100%; max-width: 980px; margin: 0 auto; display:flex; flex-direction:column; gap: 12px; }
-    .hero { border-radius: 18px; padding: 32px; border: 1px solid var(--line); background: radial-gradient(900px 380px at 15% 15%, rgba(124,92,255,0.35), transparent 60%), radial-gradient(900px 380px at 70% 20%, rgba(34,211,238,0.2), transparent 60%), rgba(0,0,0,0.22); }
+    .section { width: 100%; max-width: 980px; margin: 0 auto; display:flex; flex-direction:column; gap: 12px; background: rgba(255,255,255,0.96); border: 1px solid rgba(15,23,42,0.08); border-radius: 18px; padding: 18px; box-shadow: 0 10px 26px rgba(15,23,42,0.06); }
+    .hero { border-radius: 18px; padding: 32px; border: 1px solid rgba(15,23,42,0.08); background: radial-gradient(900px 380px at 15% 15%, rgba(37,99,235,0.10), transparent 62%), radial-gradient(900px 380px at 70% 20%, rgba(6,182,212,0.08), transparent 62%), rgba(255,255,255,0.96); }
     .hero h1 { margin:0; font-size: 44px; line-height: 1.05; letter-spacing:-0.02em; }
-    .hero p { margin: 12px 0 0 0; color: rgba(232,238,252,0.9); max-width: 60ch; line-height: 1.45; }
-    .cta { display:inline-flex; margin-top: 18px; padding: 10px 14px; border-radius: 999px; border: 1px solid rgba(124,92,255,0.6); background: rgba(124,92,255,0.2); color: var(--text); text-decoration:none; font-weight: 800; }
-    .richText { border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); padding: 18px; background: rgba(0,0,0,0.18); }
-    .imageBlock { margin:0; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); padding: 18px; background: rgba(0,0,0,0.18); }
+    .hero p { margin: 12px 0 0 0; color: rgba(51,65,85,0.92); max-width: 60ch; line-height: 1.45; }
+    .cta { display:inline-flex; margin-top: 18px; padding: 10px 14px; border-radius: 999px; border: 1px solid rgba(15,23,42,0.12); background: #111827; color: #ffffff; text-decoration:none; font-weight: 800; }
+    .richText { border-radius: 14px; border: 1px solid rgba(15,23,42,0.10); padding: 18px; background: rgba(255,255,255,0.98); }
+    .imageBlock { border-radius: 14px; border: 1px solid rgba(15,23,42,0.10); padding: 18px; background: rgba(255,255,255,0.98); }
     .imageBlock img { max-width: 100%; border-radius: 12px; display:block; }
-    .imageBlock figcaption { margin-top: 8px; color: var(--muted); font-size: 12px; }
-    .contactForm { border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); padding: 18px; background: rgba(0,0,0,0.18); }
+    .imageCaption { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .field { display:grid; gap: 6px; }
+    .field label { font-size: 12px; color: var(--muted); }
+    .field input, .field textarea { width: 100%; box-sizing:border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(15,23,42,0.10); background: rgba(255,255,255,0.98); color: var(--text); }
+    .btn { appearance:none; border: 1px solid rgba(15,23,42,0.10); background: #ffffff; color: var(--text); border-radius: 10px; padding: 10px 12px; cursor:pointer; font-weight: 700; box-shadow: 0 1px 0 rgba(15,23,42,0.04); }
+    .btn:hover { border-color: rgba(37,99,235,0.35); background: rgba(248,250,252,0.95); }
+    .btnPrimary { border-color: rgba(37,99,235,0.55); background: rgba(37,99,235,0.92); color: #ffffff; }
+    .btnPrimary:hover { border-color: rgba(37,99,235,0.70); background: rgba(37,99,235,0.98); color: #ffffff; }
+    .contactForm { border-radius: 14px; border: 1px solid rgba(15,23,42,0.10); padding: 18px; background: rgba(255,255,255,0.98); }
+    .contactForm h3 { margin: 0 0 12px 0; }
     .contactForm form { display:grid; gap: 10px; }
-    .contactForm label { display:grid; gap: 6px; }
-    .contactForm span { font-size: 12px; color: var(--muted); }
-    .contactForm input, .contactForm textarea { width: 100%; box-sizing:border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.25); color: var(--text); }
-    .contactForm button { justify-self:start; appearance:none; border: 1px solid rgba(124,92,255,0.55); background: rgba(124,92,255,0.18); color: var(--text); border-radius: 10px; padding: 10px 12px; cursor:pointer; font-weight: 800; }
+    .contactForm button { justify-self:start; }
   `.trim();
 
   const assetsById = new Map(page.assets.map((a) => [a.id, a]));
