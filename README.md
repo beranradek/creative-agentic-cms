@@ -31,6 +31,8 @@ optimized for Page Speed Insights quality and performance metrics.
 
 Creation of simple contact forms should be possible using this demo.
 
+Image generating feature using LLM agent should be implemented. 
+
 No database is involved in this demo.
 
 No locking, versioning, editing workflows, releases, content activities, audit/event or cost tracking,
