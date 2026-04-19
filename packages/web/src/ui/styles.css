@@ -1,13 +1,14 @@
 :root {
   color-scheme: light;
-  --bg: #0b0d12;
-  --panel: #101522;
-  --text: #e8eefc;
-  --muted: #a7b3d6;
-  --line: rgba(255, 255, 255, 0.08);
-  --accent: #7c5cff;
-  --accent2: #22d3ee;
-  --danger: #ff4d6d;
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: rgba(15, 23, 42, 0.10);
+  --accent: #2563eb;
+  --accent2: #06b6d4;
+  --danger: #e11d48;
+  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
     Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
@@ -19,8 +20,8 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 15% 10%, rgba(124, 92, 255, 0.35), transparent 55%),
-    radial-gradient(900px 500px at 70% 20%, rgba(34, 211, 238, 0.22), transparent 55%),
+  background: radial-gradient(1200px 600px at 15% 10%, rgba(37, 99, 235, 0.10), transparent 58%),
+    radial-gradient(900px 500px at 70% 20%, rgba(6, 182, 212, 0.08), transparent 58%),
     var(--bg);
   color: var(--text);
 }
@@ -41,8 +42,8 @@ body {
   pointer-events: auto;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.50);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
   padding: 10px 12px;
 }
 
@@ -74,7 +75,7 @@ body {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(232, 238, 252, 0.85);
+  color: rgba(15, 23, 42, 0.75);
   border-radius: 10px;
   width: 30px;
   height: 30px;
@@ -87,23 +88,23 @@ body {
 }
 
 .toastClose:hover {
-  border-color: rgba(124, 92, 255, 0.4);
-  background: rgba(124, 92, 255, 0.12);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
 }
 
 .toastMessage {
   margin-top: 6px;
-  color: rgba(167, 179, 214, 0.95);
+  color: rgba(51, 65, 85, 0.95);
   font-size: 12px;
   line-height: 1.35;
 }
 
 .errorBox {
-  border: 1px solid rgba(255, 77, 109, 0.35);
-  background: rgba(255, 77, 109, 0.10);
+  border: 1px solid rgba(225, 29, 72, 0.25);
+  background: rgba(225, 29, 72, 0.06);
   border-radius: 12px;
   padding: 10px;
-  color: rgba(232, 238, 252, 0.95);
+  color: rgba(15, 23, 42, 0.92);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -123,13 +124,14 @@ body {
 }
 
 .panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  box-shadow: var(--shadow);
 }
 
 .panelHeader {
@@ -139,6 +141,7 @@ body {
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.7);
 }
 
 .panelHeader h2 {
@@ -174,7 +177,7 @@ body {
   gap: 8px;
   align-items: center;
   border-right: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(248, 250, 252, 0.9);
 }
 
 .paletteTabBtn {
@@ -184,7 +187,7 @@ body {
   border-radius: 14px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(167, 179, 214, 0.9);
+  color: rgba(51, 65, 85, 0.75);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -194,14 +197,14 @@ body {
 
 .paletteTabBtn:hover {
   transform: translateY(-1px);
-  border-color: rgba(124, 92, 255, 0.4);
-  background: rgba(124, 92, 255, 0.12);
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(37, 99, 235, 0.08);
   color: var(--text);
 }
 
 .paletteTabBtnActive {
-  border-color: rgba(124, 92, 255, 0.6);
-  background: rgba(124, 92, 255, 0.16);
+  border-color: rgba(37, 99, 235, 0.38);
+  background: rgba(37, 99, 235, 0.12);
   color: var(--text);
 }
 
@@ -216,7 +219,7 @@ body {
 .paletteSidebarHeader {
   padding: 12px 12px 10px 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(248, 250, 252, 0.7);
 }
 
 .paletteSidebarTitle {
@@ -246,29 +249,31 @@ body {
 .btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: #ffffff;
   color: var(--text);
   border-radius: 10px;
   padding: 10px 12px;
   cursor: pointer;
   font-weight: 600;
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 .btn:hover {
   transform: translateY(-1px);
-  border-color: rgba(124, 92, 255, 0.5);
-  background: rgba(124, 92, 255, 0.12);
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(248, 250, 252, 0.95);
 }
 
 .btnPrimary {
-  border-color: rgba(124, 92, 255, 0.55);
-  background: rgba(124, 92, 255, 0.18);
+  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(37, 99, 235, 0.92);
+  color: #ffffff;
 }
 
 .btnDanger:hover {
-  border-color: rgba(255, 77, 109, 0.6);
-  background: rgba(255, 77, 109, 0.16);
+  border-color: rgba(225, 29, 72, 0.45);
+  background: rgba(225, 29, 72, 0.08);
 }
 
 .field {
@@ -289,8 +294,16 @@ body {
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.98);
   color: var(--text);
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .muted {
@@ -309,7 +322,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(248, 250, 252, 0.7);
 }
 
 .cardTitle {
@@ -324,6 +337,7 @@ body {
   border-radius: 999px;
   border: 1px solid var(--line);
   color: var(--muted);
+  background: rgba(248, 250, 252, 0.9);
 }
 
 .dragHandle {
@@ -334,7 +348,7 @@ body {
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(248, 250, 252, 0.9);
   color: var(--muted);
   cursor: grab;
   user-select: none;
@@ -345,7 +359,7 @@ body {
 }
 
 .canvas {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(248, 250, 252, 0.95);
   border-radius: 12px;
   border: 1px solid var(--line);
   overflow: hidden;
@@ -362,6 +376,9 @@ body {
   max-width: 980px;
   margin: 0 auto;
   border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
 }
 
 .previewItem {
@@ -373,18 +390,18 @@ body {
 }
 
 .previewItem:hover {
-  outline-color: rgba(124, 92, 255, 0.35);
+  outline-color: rgba(37, 99, 235, 0.28);
 }
 
 .previewItemSelected {
-  outline-color: rgba(124, 92, 255, 0.85);
+  outline-color: rgba(37, 99, 235, 0.75);
 }
 
 .previewDropZone {
-  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border: 1px dashed rgba(15, 23, 42, 0.18);
   border-radius: 14px;
   padding: 10px 12px;
-  color: rgba(232, 238, 252, 0.55);
+  color: rgba(71, 85, 105, 0.9);
   font-size: 12px;
   text-align: center;
 }
@@ -397,9 +414,10 @@ body {
   gap: 8px;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.14);
 }
 
 .previewToolbar .btn {
@@ -421,10 +439,10 @@ body {
   width: min(980px, 100%);
   max-height: min(92vh, 920px);
   overflow: auto;
-  background: rgba(12, 14, 20, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 18px;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.22);
 }
 
 .modalHeader {
@@ -443,10 +461,10 @@ body {
   width: 100%;
   height: 440px;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: radial-gradient(900px 380px at 15% 15%, rgba(124, 92, 255, 0.18), transparent 60%),
-    radial-gradient(900px 380px at 70% 20%, rgba(34, 211, 238, 0.12), transparent 60%),
-    rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: radial-gradient(900px 380px at 15% 15%, rgba(37, 99, 235, 0.09), transparent 60%),
+    radial-gradient(900px 380px at 70% 20%, rgba(6, 182, 212, 0.07), transparent 60%),
+    rgba(248, 250, 252, 0.95);
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -461,17 +479,17 @@ body {
 .cropBox {
   position: absolute;
   border-radius: 14px;
-  border: 2px solid rgba(232, 238, 252, 0.9);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(15, 23, 42, 0.85);
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.35);
 }
 
 .hero {
   border-radius: 18px;
   padding: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: radial-gradient(900px 380px at 15% 15%, rgba(124, 92, 255, 0.35), transparent 60%),
-    radial-gradient(900px 380px at 70% 20%, rgba(34, 211, 238, 0.2), transparent 60%),
-    rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: radial-gradient(900px 380px at 15% 15%, rgba(37, 99, 235, 0.10), transparent 62%),
+    radial-gradient(900px 380px at 70% 20%, rgba(6, 182, 212, 0.08), transparent 62%),
+    rgba(255, 255, 255, 0.96);
 }
 
 .hero h1 {
@@ -483,7 +501,7 @@ body {
 
 .hero p {
   margin: 12px 0 0 0;
-  color: rgba(232, 238, 252, 0.88);
+  color: rgba(51, 65, 85, 0.92);
   max-width: 60ch;
   line-height: 1.45;
 }
@@ -493,18 +511,18 @@ body {
   margin-top: 18px;
   padding: 10px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(124, 92, 255, 0.6);
-  background: rgba(124, 92, 255, 0.2);
-  color: var(--text);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #111827;
+  color: #ffffff;
   text-decoration: none;
   font-weight: 800;
 }
 
 .richText {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.10);
   padding: 18px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .richTextEditable {
@@ -515,9 +533,9 @@ body {
 
 .imageBlock {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.10);
   padding: 18px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .imageBlock img {
@@ -534,9 +552,9 @@ body {
 
 .contactForm {
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.10);
   padding: 18px;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .contactForm h3 {
