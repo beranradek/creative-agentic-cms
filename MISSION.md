@@ -38,7 +38,7 @@ Creative Agentic CMS is **not** a headless CMS, a multi-tenant publishing platfo
 - Transform images (resize, crop)
 - Place images into components and edit placements
 - Re-edit previously placed images
-- **AI image generation** via LLM-backed agent flow, with generated images flowing into the same assets folder (generation → temporary preview → save-to-gallery (assets) pattern is explicitly in scope)
+- **AI image generation is a first-class, in-scope Core Capability.** A dedicated LangChain.js-based image-generation agent (on top of `@langchain/openai`) takes a user prompt plus output-size/quality options and produces images. Generated images flow into the same `assets/` folder via a generation → temporary preview → save-to-gallery pattern. The reference implementation in `docs/examples/imagegen` is the blueprint to rewrite idiomatically in Node/TypeScript. Issues asking for this feature, for UI around it (generation dialog, form, preview, save controls), or for refinements of it (prompt handling, size/quality options, rate limiting, error mapping, TTL-temp cache) are accepted.
 
 **Live preview**
 - Preview area renders the currently composed page
