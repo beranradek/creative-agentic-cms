@@ -30,6 +30,8 @@ type ImageEditorState =
       replaceAllUsages: boolean;
     };
 
+type PaletteTab = "project" | "agent" | "add" | "assets";
+
 const DEFAULT_PROJECT_ID = "demo";
 
 function createId(prefix: string): string {
@@ -345,6 +347,8 @@ export function App() {
   const [projectId, setProjectId] = useState(DEFAULT_PROJECT_ID);
   const [loadedProjectId, setLoadedProjectId] = useState(DEFAULT_PROJECT_ID);
   const [state, setState] = useState<LoadState>({ kind: "idle" });
+  const [paletteTab, setPaletteTab] = useState<PaletteTab>("project");
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
@@ -660,6 +664,17 @@ export function App() {
     }
   }, [activeProjectId]);
 
+  const openPaletteTab = useCallback((tab: PaletteTab) => {
+    setPaletteTab((current) => {
+      if (current === tab) {
+        setPaletteCollapsed((prev) => !prev);
+        return current;
+      }
+      setPaletteCollapsed(false);
+      return tab;
+    });
+  }, []);
+
   return (
     <div className="shell">
       <div className="panel">
@@ -667,282 +682,388 @@ export function App() {
           <h2>Palette</h2>
           <span className="badge">MVP</span>
         </div>
-        <div className="panelBody">
-          <div className="stack">
-            <div className="field">
-              <label>Project</label>
-              <div className="row">
-                <input
-                  data-testid="project-id"
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                />
-                <button className="btn" data-testid="project-load" onClick={() => void load()}>
-                  Load
-                </button>
-              </div>
-              <div className="muted">
-                Storage is local (filesystem). Current project: <b>{projectId}</b>
-                <span className="badge" data-testid="load-state" style={{ marginLeft: 8 }}>
-                  {state.kind}
-                </span>
-                <span className="badge" data-testid="loaded-project" style={{ marginLeft: 8, opacity: 0.85 }}>
-                  loaded: {loadedProjectId}
-                </span>
-              </div>
-              <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
-                <div className="muted">Projects</div>
-                <button className="btn" onClick={() => void refreshProjects()} disabled={isProjectsLoading}>
-                  {isProjectsLoading ? "Refreshing..." : "Refresh"}
-                </button>
-              </div>
-              {projectsError ? <div className="muted">Failed to load projects: {projectsError}</div> : null}
-              {projects.length ? (
-                <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
-                  {projects.map((p) => (
-                    <button
-                      key={p}
-                      className="btn"
-                      style={{ padding: "6px 10px", opacity: p === projectId ? 1 : 0.8 }}
-                      onClick={() => {
-                        void load(p);
-                      }}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="muted">No projects yet. Load a new project id to create one.</div>
-              )}
+        <div className="panelBody panelBodyPalette">
+          <div className="paletteLayout">
+            <div className="paletteActivityBar" aria-label="Palette tabs">
+              <button
+                type="button"
+                className={paletteTab === "project" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-project"
+                onClick={() => openPaletteTab("project")}
+                title="Project"
+                aria-label="Project"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M4 7.5c0-1.1.9-2 2-2h5l2 2h7c1.1 0 2 .9 2 2V18c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V7.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={paletteTab === "agent" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-agent"
+                onClick={() => openPaletteTab("agent")}
+                title="Agent"
+                aria-label="Agent"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 9a4 4 0 0 1 8 0v1.5c0 .8.7 1.5 1.5 1.5H18a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V16a2 2 0 0 1 2-2h.5c.8 0 1.5-.7 1.5-1.5V9Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M9.5 20v-1.5M14.5 20v-1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={paletteTab === "add" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-add"
+                onClick={() => openPaletteTab("add")}
+                title="Add blocks"
+                aria-label="Add blocks"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={paletteTab === "assets" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-images"
+                onClick={() => openPaletteTab("assets")}
+                title="Images + Assets"
+                aria-label="Images + Assets"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 6h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M8 14.5l2.2-2.2a1.6 1.6 0 0 1 2.3 0L16 13.8l1.2-1.2a1.6 1.6 0 0 1 2.3 0L20 13.1"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                  <path d="M9 10.2a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z" fill="currentColor" />
+                </svg>
+              </button>
             </div>
 
-            <button
-              className="btn btnPrimary"
-              data-testid="add-hero"
-              onClick={() => addSectionWithComponent("hero", "Hero")}
-              disabled={!canEdit}
-            >
-              Add Hero
-            </button>
-            <button
-              className="btn"
-              data-testid="add-text"
-              onClick={() => addSectionWithComponent("rich_text", "Text")}
-              disabled={!canEdit}
-            >
-              Add Text
-            </button>
-            <button
-              className="btn"
-              data-testid="add-contact"
-              onClick={() => addSectionWithComponent("contact_form", "Contact")}
-              disabled={!canEdit}
-            >
-              Add Contact Form
-            </button>
-
-            <div className="card">
-              <div className="cardTitle">Images</div>
-              <div className="row" style={{ alignItems: "flex-end" }}>
-                <label className="row" style={{ gap: 8, alignItems: "center", flex: 1 }}>
-                  <input
-                    type="checkbox"
-                    checked={optimizeUploads}
-                    onChange={(e) => setOptimizeUploads(e.target.checked)}
-                  />
-                  <span className="muted">Optimize (downscale)</span>
-                </label>
-                <div className="field" style={{ width: 120 }}>
-                  <label>Max px</label>
-                  <input
-                    value={String(maxUploadPx)}
-                    onChange={(e) => setMaxUploadPx(Number(e.target.value || "0"))}
-                    inputMode="numeric"
-                  />
+            {paletteCollapsed ? null : (
+              <div className="paletteSidebar">
+                <div className="paletteSidebarHeader">
+                  <div className="paletteSidebarTitle" data-testid="palette-active-title">
+                    {paletteTab === "project"
+                      ? "Project"
+                      : paletteTab === "agent"
+                        ? "Agent"
+                        : paletteTab === "add"
+                          ? "Add blocks"
+                          : "Images + Assets"}
+                  </div>
                 </div>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                data-testid="upload-image"
-                disabled={!canEdit}
-                onChange={() => void uploadImage()}
-              />
-              <div className="muted">Uploads to <code>projects/&lt;projectId&gt;/assets</code> and inserts an image block.</div>
-            </div>
-
-            <div className="card">
-              <div className="cardTitle">Assets</div>
-              {page ? (
-                imageAssets.length ? (
-                  <div className="stack">
-                    {imageAssets.map((asset) => (
-                      <div key={asset.id} className="row" style={{ alignItems: "flex-start" }}>
-                        <img
-                          src={`/projects/${encodeURIComponent(activeProjectId)}/assets/${asset.filename}`}
-                          alt={asset.alt}
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 10,
-                            objectFit: "cover",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                          }}
-                        />
-                        <div className="field" style={{ flex: 1 }}>
-                          <label>Alt</label>
-                          <input
-                            value={asset.alt}
-                            disabled={!canEdit}
-                            onChange={(e) =>
-                              updatePage((prev) =>
-                                PageSchema.parse({
-                                  ...prev,
-                                  assets: prev.assets.map((a) =>
-                                    a.type === "image" && a.id === asset.id ? { ...a, alt: e.target.value } : a
-                                  ),
-                                })
-                              )
-                            }
-                          />
-                        </div>
-                        <div className="row" style={{ paddingTop: 18 }}>
-                          <button
-                            className="btn"
-                            disabled={!canEdit}
-                            onClick={() => setImageEditor({ kind: "asset", assetId: asset.id, replaceAllUsages: false })}
-                          >
-                            Edit
+                <div className="paletteSidebarBody">
+                  {paletteTab === "project" ? (
+                    <div className="stack">
+                      <div className="field">
+                        <label>Project</label>
+                        <div className="row">
+                          <input data-testid="project-id" value={projectId} onChange={(e) => setProjectId(e.target.value)} />
+                          <button className="btn" data-testid="project-load" onClick={() => void load()}>
+                            Load
                           </button>
                         </div>
+                        <div className="muted">
+                          Storage is local (filesystem). Current project: <b>{projectId}</b>
+                          <span className="badge" data-testid="load-state" style={{ marginLeft: 8 }}>
+                            {state.kind}
+                          </span>
+                          <span className="badge" data-testid="loaded-project" style={{ marginLeft: 8, opacity: 0.85 }}>
+                            loaded: {loadedProjectId}
+                          </span>
+                        </div>
+                        <div className="row" style={{ marginTop: 8, justifyContent: "space-between" }}>
+                          <div className="muted">Projects</div>
+                          <button className="btn" onClick={() => void refreshProjects()} disabled={isProjectsLoading}>
+                            {isProjectsLoading ? "Refreshing..." : "Refresh"}
+                          </button>
+                        </div>
+                        {projectsError ? <div className="muted">Failed to load projects: {projectsError}</div> : null}
+                        {projects.length ? (
+                          <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+                            {projects.map((p) => (
+                              <button
+                                key={p}
+                                className="btn"
+                                style={{ padding: "6px 10px", opacity: p === projectId ? 1 : 0.8 }}
+                                onClick={() => {
+                                  void load(p);
+                                }}
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="muted">No projects yet. Load a new project id to create one.</div>
+                        )}
                       </div>
-                    ))}
-                    <div className="muted">Alt text is stored in <code>page.json</code> (asset metadata).</div>
-                  </div>
-                ) : (
-                  <div className="muted">No assets yet. Upload an image to start a library.</div>
-                )
-              ) : (
-                <div className="muted">Loading…</div>
-              )}
-            </div>
 
-            <div className="card">
-              <div className="cardTitle">Save</div>
-              <div className="row">
-                <button
-                  className="btn btnPrimary"
-                  data-testid="save-page"
-                  onClick={() => void save()}
-                  disabled={!canEdit || isSaving}
-                >
-                  {isSaving ? "Saving..." : "Save page.json"}
-                </button>
-                <button className="btn" data-testid="reload-page" onClick={() => void load()}>
-                  Reload
-                </button>
-              </div>
-              <div className="muted">
-                Writes to <code>projects/&lt;projectId&gt;/page.json</code>.
-              </div>
-              <div className="row" style={{ marginTop: 10 }}>
-                <button className="btn" onClick={() => void exportProject()} disabled={!page || isExporting}>
-                  {isExporting ? "Exporting..." : "Export static site"}
-                </button>
-                <button
-                  className="btn"
-                  data-testid="capture-screenshot"
-                  onClick={() => void captureScreenshot()}
-                  disabled={!page || isCapturingScreenshot}
-                >
-                  {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
-                </button>
-              </div>
-              {exportInfo ? (
-                <div className="muted">
-                  Exported to <code>{exportInfo}</code>
-                </div>
-              ) : null}
-              {screenshotUrl ? (
-                <div className="stack" style={{ marginTop: 10 }}>
-                  <div className="muted">
-                    Latest: <code>{screenshotUrl}</code>
-                  </div>
-                  <img
-                    src={screenshotUrl}
-                    alt="Preview screenshot"
-                    data-testid="preview-screenshot"
-                    style={{ width: "100%", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)" }}
-                  />
-                </div>
-              ) : (
-                <div className="muted" style={{ marginTop: 8 }}>
-                  Screenshot capture requires Playwright on the server.
-                </div>
-              )}
-            </div>
-
-            <div className="card">
-              <div className="cardTitle">Agent</div>
-              <div className="field">
-                <label>Ask the agent to edit the page</label>
-                <textarea
-                  rows={4}
-                  data-testid="agent-text"
-                  value={agentText}
-                  onChange={(e) => setAgentText(e.target.value)}
-                  placeholder='Example: "Make the hero headline shorter and more specific to a sleep coaching business."'
-                />
-                <div className="row" style={{ marginTop: 8, alignItems: "flex-end", justifyContent: "space-between" }}>
-                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <button
-                      className={isSttActive ? "btn btnPrimary" : "btn"}
-                      data-testid="agent-mic"
-                      disabled={!sttSupported || isAgentRunning}
-                      onClick={() => toggleAgentStt()}
-                      title={sttSupported ? "Speech-to-text" : "Speech-to-text is not supported in this browser"}
-                    >
-                      {isSttActive ? "Stop mic" : "Mic"}
-                    </button>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Lang</label>
-                      <input value={sttLang} onChange={(e) => setSttLang(e.target.value)} disabled={!sttSupported || isAgentRunning} />
+                      <div className="card">
+                        <div className="cardTitle">Save / Export</div>
+                        <div className="row">
+                          <button
+                            className="btn btnPrimary"
+                            data-testid="save-page"
+                            onClick={() => void save()}
+                            disabled={!canEdit || isSaving}
+                          >
+                            {isSaving ? "Saving..." : "Save page.json"}
+                          </button>
+                          <button className="btn" data-testid="reload-page" onClick={() => void load()}>
+                            Reload
+                          </button>
+                        </div>
+                        <div className="muted">
+                          Writes to <code>projects/&lt;projectId&gt;/page.json</code>.
+                        </div>
+                        <div className="row" style={{ marginTop: 10 }}>
+                          <button className="btn" onClick={() => void exportProject()} disabled={!page || isExporting}>
+                            {isExporting ? "Exporting..." : "Export static site"}
+                          </button>
+                          <button
+                            className="btn"
+                            data-testid="capture-screenshot"
+                            onClick={() => void captureScreenshot()}
+                            disabled={!page || isCapturingScreenshot}
+                          >
+                            {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
+                          </button>
+                        </div>
+                        {exportInfo ? (
+                          <div className="muted">
+                            Exported to <code>{exportInfo}</code>
+                          </div>
+                        ) : null}
+                        {screenshotUrl ? (
+                          <div className="stack" style={{ marginTop: 10 }}>
+                            <div className="muted">
+                              Latest: <code>{screenshotUrl}</code>
+                            </div>
+                            <img
+                              src={screenshotUrl}
+                              alt="Preview screenshot"
+                              data-testid="preview-screenshot"
+                              style={{ width: "100%", borderRadius: 12, border: "1px solid rgba(255,255,255,0.10)" }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="muted" style={{ marginTop: 8 }}>
+                            Screenshot capture requires Playwright on the server.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Mode</label>
-                      <select
-                        value={sttMode}
-                        onChange={(e) => setSttMode(e.target.value === "replace" ? "replace" : "append")}
-                        disabled={!sttSupported || isAgentRunning || isSttActive}
+                  ) : null}
+
+                  {paletteTab === "agent" ? (
+                    <div className="card">
+                      <div className="cardTitle">Agent</div>
+                      <div className="field">
+                        <label>Ask the agent to edit the page</label>
+                        <textarea
+                          rows={4}
+                          data-testid="agent-text"
+                          value={agentText}
+                          onChange={(e) => setAgentText(e.target.value)}
+                          placeholder='Example: "Make the hero headline shorter and more specific to a sleep coaching business."'
+                        />
+                        <div className="row" style={{ marginTop: 8, alignItems: "flex-end", justifyContent: "space-between" }}>
+                          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <button
+                              className={isSttActive ? "btn btnPrimary" : "btn"}
+                              data-testid="agent-mic"
+                              disabled={!sttSupported || isAgentRunning}
+                              onClick={() => toggleAgentStt()}
+                              title={sttSupported ? "Speech-to-text" : "Speech-to-text is not supported in this browser"}
+                            >
+                              {isSttActive ? "Stop mic" : "Mic"}
+                            </button>
+                            <div className="field" style={{ width: 140 }}>
+                              <label>Lang</label>
+                              <input
+                                value={sttLang}
+                                onChange={(e) => setSttLang(e.target.value)}
+                                disabled={!sttSupported || isAgentRunning}
+                              />
+                            </div>
+                            <div className="field" style={{ width: 140 }}>
+                              <label>Mode</label>
+                              <select
+                                value={sttMode}
+                                onChange={(e) => setSttMode(e.target.value === "replace" ? "replace" : "append")}
+                                disabled={!sttSupported || isAgentRunning || isSttActive}
+                              >
+                                <option value="append">append</option>
+                                <option value="replace">replace</option>
+                              </select>
+                            </div>
+                            {sttInterim ? <span className="badge">listening…</span> : null}
+                          </div>
+                        </div>
+                        {sttError ? <div className="muted">Mic error: {sttError}</div> : null}
+                      </div>
+                      <div className="row">
+                        <button
+                          className="btn btnPrimary"
+                          data-testid="agent-run"
+                          onClick={() => void runAgent()}
+                          disabled={!page || isAgentRunning}
+                        >
+                          {isAgentRunning ? "Running..." : "Run agent"}
+                        </button>
+                        <button className="btn" onClick={() => setAgentReply(null)} disabled={!agentReply}>
+                          Clear reply
+                        </button>
+                      </div>
+                      {agentReply ? <div className="muted">{agentReply}</div> : <div className="muted">Uses `OPENAI_API_KEY` from `.env`.</div>}
+                    </div>
+                  ) : null}
+
+                  {paletteTab === "add" ? (
+                    <div className="stack">
+                      <button
+                        className="btn btnPrimary"
+                        data-testid="add-hero"
+                        onClick={() => addSectionWithComponent("hero", "Hero")}
+                        disabled={!canEdit}
                       >
-                        <option value="append">append</option>
-                        <option value="replace">replace</option>
-                      </select>
+                        Add Hero
+                      </button>
+                      <button
+                        className="btn"
+                        data-testid="add-text"
+                        onClick={() => addSectionWithComponent("rich_text", "Text")}
+                        disabled={!canEdit}
+                      >
+                        Add Text
+                      </button>
+                      <button
+                        className="btn"
+                        data-testid="add-contact"
+                        onClick={() => addSectionWithComponent("contact_form", "Contact")}
+                        disabled={!canEdit}
+                      >
+                        Add Contact Form
+                      </button>
                     </div>
-                    {sttInterim ? <span className="badge">listening…</span> : null}
-                  </div>
-                </div>
-                {sttError ? <div className="muted">Mic error: {sttError}</div> : null}
-              </div>
-              <div className="row">
-                <button
-                  className="btn btnPrimary"
-                  data-testid="agent-run"
-                  onClick={() => void runAgent()}
-                  disabled={!page || isAgentRunning}
-                >
-                  {isAgentRunning ? "Running..." : "Run agent"}
-                </button>
-                <button className="btn" onClick={() => setAgentReply(null)} disabled={!agentReply}>
-                  Clear reply
-                </button>
-              </div>
-              {agentReply ? <div className="muted">{agentReply}</div> : <div className="muted">Uses `OPENAI_API_KEY` from `.env`.</div>}
-            </div>
+                  ) : null}
 
-            {state.kind === "error" ? <div className="card">{state.message}</div> : null}
+                  {paletteTab === "assets" ? (
+                    <div className="stack">
+                      <div className="card">
+                        <div className="cardTitle">Images</div>
+                        <div className="row" style={{ alignItems: "flex-end" }}>
+                          <label className="row" style={{ gap: 8, alignItems: "center", flex: 1 }}>
+                            <input type="checkbox" checked={optimizeUploads} onChange={(e) => setOptimizeUploads(e.target.checked)} />
+                            <span className="muted">Optimize (downscale)</span>
+                          </label>
+                          <div className="field" style={{ width: 120 }}>
+                            <label>Max px</label>
+                            <input
+                              value={String(maxUploadPx)}
+                              onChange={(e) => setMaxUploadPx(Number(e.target.value || "0"))}
+                              inputMode="numeric"
+                            />
+                          </div>
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          data-testid="upload-image"
+                          disabled={!canEdit}
+                          onChange={() => void uploadImage()}
+                        />
+                        <div className="muted">
+                          Uploads to <code>projects/&lt;projectId&gt;/assets</code> and inserts an image block.
+                        </div>
+                      </div>
+
+                      <div className="card">
+                        <div className="cardTitle">Assets</div>
+                        {page ? (
+                          imageAssets.length ? (
+                            <div className="stack">
+                              {imageAssets.map((asset) => (
+                                <div key={asset.id} className="row" style={{ alignItems: "flex-start" }}>
+                                  <img
+                                    src={`/projects/${encodeURIComponent(activeProjectId)}/assets/${asset.filename}`}
+                                    alt={asset.alt}
+                                    style={{
+                                      width: 44,
+                                      height: 44,
+                                      borderRadius: 10,
+                                      objectFit: "cover",
+                                      border: "1px solid rgba(255,255,255,0.1)",
+                                    }}
+                                  />
+                                  <div className="field" style={{ flex: 1 }}>
+                                    <label>Alt</label>
+                                    <input
+                                      value={asset.alt}
+                                      disabled={!canEdit}
+                                      onChange={(e) =>
+                                        updatePage((prev) =>
+                                          PageSchema.parse({
+                                            ...prev,
+                                            assets: prev.assets.map((a) =>
+                                              a.type === "image" && a.id === asset.id ? { ...a, alt: e.target.value } : a
+                                            ),
+                                          })
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                  <div className="row" style={{ paddingTop: 18 }}>
+                                    <button
+                                      className="btn"
+                                      disabled={!canEdit}
+                                      onClick={() => setImageEditor({ kind: "asset", assetId: asset.id, replaceAllUsages: false })}
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                              <div className="muted">
+                                Alt text is stored in <code>page.json</code> (asset metadata).
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="muted">No assets yet. Upload an image to start a library.</div>
+                          )
+                        ) : (
+                          <div className="muted">Loading…</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {state.kind === "error" ? <div className="card">{state.message}</div> : null}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

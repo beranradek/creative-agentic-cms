@@ -67,6 +67,82 @@ body {
   min-height: 0;
 }
 
+.panelBodyPalette {
+  padding: 0;
+  overflow: hidden;
+}
+
+.paletteLayout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.paletteActivityBar {
+  width: 56px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  border-right: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.paletteTabBtn {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(167, 179, 214, 0.9);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, color 120ms ease;
+}
+
+.paletteTabBtn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(124, 92, 255, 0.4);
+  background: rgba(124, 92, 255, 0.12);
+  color: var(--text);
+}
+
+.paletteTabBtnActive {
+  border-color: rgba(124, 92, 255, 0.6);
+  background: rgba(124, 92, 255, 0.16);
+  color: var(--text);
+}
+
+.paletteSidebar {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.paletteSidebarHeader {
+  padding: 12px 12px 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.paletteSidebarTitle {
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.paletteSidebarBody {
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+}
+
 .row {
   display: flex;
   gap: 10px;

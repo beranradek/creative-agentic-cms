@@ -4,10 +4,39 @@ const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Gd0sAAAAASUVORK5CYII=";
 
 async function loadProject(page: import("@playwright/test").Page, projectId: string) {
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("project-id").fill(projectId);
   await page.getByTestId("project-load").click();
   await expect(page.getByTestId("loaded-project")).toHaveText(`loaded: ${projectId}`);
   await expect(page.getByTestId("load-state")).toHaveText("ready");
+}
+
+async function ensurePaletteTab(
+  page: import("@playwright/test").Page,
+  tab: "project" | "agent" | "add" | "images"
+) {
+  const titleByTab: Record<typeof tab, string> = {
+    project: "Project",
+    agent: "Agent",
+    add: "Add blocks",
+    images: "Images + Assets",
+  };
+  const testIdByTab: Record<typeof tab, string> = {
+    project: "palette-tab-project",
+    agent: "palette-tab-agent",
+    add: "palette-tab-add",
+    images: "palette-tab-images",
+  };
+
+  const desiredTitle = titleByTab[tab];
+  const title = page.getByTestId("palette-active-title");
+  if (await title.isVisible().catch(() => false)) {
+    const current = (await title.textContent())?.trim();
+    if (current === desiredTitle) return;
+  }
+
+  await page.getByTestId(testIdByTab[tab]).click();
+  await expect(title).toHaveText(desiredTitle);
 }
 
 test("editor can add content, upload image, save and reload", async ({ page }) => {
@@ -16,9 +45,11 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
   const projectId = `e2e_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
+  await ensurePaletteTab(page, "images");
   await page.getByTestId("upload-image").setInputFiles({
     name: "tiny.png",
     mimeType: "image/png",
@@ -27,6 +58,7 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
 
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -40,6 +72,7 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   const projectId = `e2e_reorder_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
@@ -55,6 +88,7 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   expect(types[0]).toBe("rich_text");
   expect(types[1]).toBe("hero");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -72,6 +106,7 @@ test("components can be moved across sections via drag and drop in Preview", asy
   const projectId = `e2e_cross_section_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
@@ -84,6 +119,7 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   await expect(cards.nth(0)).toContainText("0 components");
@@ -96,6 +132,7 @@ test("components can be reordered via drag and drop in Preview (within a section
   const projectId = `e2e_preview_reorder_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
   const sectionCard = page.getByTestId("structure-section-card").first();
@@ -114,6 +151,7 @@ test("components can be reordered via drag and drop in Preview (within a section
   );
   expect(types[0]).toBe("rich_text");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
@@ -128,6 +166,7 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   const projectId = `e2e_inline_hero_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
   await page.locator('[data-testid="preview-item"][data-component-type="hero"]').click();
@@ -137,6 +176,7 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.keyboard.press("Control+A");
   await page.keyboard.type("Hello from inline hero");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -149,6 +189,7 @@ test("section style (background + padding) persists", async ({ page }) => {
   const projectId = `e2e_section_style_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
   await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
 
@@ -168,6 +209,7 @@ test("section style (background + padding) persists", async ({ page }) => {
   const pad = await section.evaluate((el) => getComputedStyle(el).paddingTop);
   expect(pad).toBe("24px");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -183,6 +225,7 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   const projectId = `e2e_toolbar_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
   const heroItem = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
@@ -191,6 +234,7 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   await page.getByTestId("preview-duplicate").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
@@ -199,6 +243,7 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   await page.getByTestId("preview-delete").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
@@ -210,6 +255,7 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   const projectId = `e2e_inline_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-text").click();
 
   await page.locator('[data-testid="preview-item"][data-component-type="rich_text"]').click();
@@ -221,6 +267,7 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await page.keyboard.type("Hello inline editor");
 
   // Blur to trigger sanitization + model update.
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -233,6 +280,7 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   const projectId = `e2e_img_replace_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "images");
   await page.getByTestId("upload-image").setInputFiles({
     name: "tiny.png",
     mimeType: "image/png",
@@ -255,6 +303,7 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   const afterReplace = await img.getAttribute("src");
   if (!afterReplace) throw new Error("missing img src after replace");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
@@ -267,6 +316,7 @@ test("image style (radius + max width) persists", async ({ page }) => {
   const projectId = `e2e_img_style_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "images");
   await page.getByTestId("upload-image").setInputFiles({
     name: "tiny.png",
     mimeType: "image/png",
@@ -292,6 +342,7 @@ test("image style (radius + max width) persists", async ({ page }) => {
   const radius = await page.locator(".imageBlock img").first().evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
   expect(radius).toBe("20px");
 
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
@@ -309,7 +360,10 @@ test("can capture a preview screenshot (server Playwright required)", async ({ p
   const projectId = `e2e_shot_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
+
+  await ensurePaletteTab(page, "project");
   await page.getByTestId("capture-screenshot").click();
 
   await expect(page.getByTestId("preview-screenshot")).toBeVisible();
