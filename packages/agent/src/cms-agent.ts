@@ -3,7 +3,6 @@ import { ChatOpenAI } from "@langchain/openai";
 import { PageSchema, type Page, type Asset, type Component } from "@cac/shared";
 import { SimpleCircuitBreaker } from "./circuit-breaker.js";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { assertNoImplicitDeletions, assertNoUnexpectedStructuralChanges } from "./guardrails.js";
 
 const AgentInputSchema = z.object({
   userMessage: z.string().min(1),
@@ -32,15 +31,12 @@ You edit a single page represented as JSON.
 Rules:
 - Output MUST match the provided JSON schema (structured output).
 - Preserve existing ids whenever you edit existing content.
-- Do not restructure, reorder, or move blocks unless explicitly asked.
-- Do not add any new sections/components/assets unless explicitly asked.
 - When creating new ids, use deterministic prefixes:
   - sec_<uuid> for sections
   - cmp_<uuid> for components
   - img_<uuid> for image assets
-- Do not remove sections/components/assets unless explicitly asked.
 - Keep rich_text.html valid, minimal HTML (p, ul, ol, li, strong, em, a).
-- Prefer small, safe changes that satisfy the request.
+- You may freely add, remove, reorder, or restructure sections, components, and assets to best satisfy the user's request.
 `;
 }
 
@@ -176,8 +172,6 @@ ${parsed.userMessage}`;
     ]);
 
     const output = AgentOutputSchema.parse(response);
-    assertNoImplicitDeletions(parsed.page, output.page);
-    assertNoUnexpectedStructuralChanges(parsed.page, output.page, parsed.userMessage);
     circuitBreaker.onSuccess();
     return output;
   } catch (error) {
