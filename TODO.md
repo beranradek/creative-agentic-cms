@@ -5,7 +5,7 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 0 — Foundations (keep velocity high)
 
-- [ ] Keep `pnpm-lock.yaml` pinned and CI-friendly (no floating versions).
+- [x] Keep `pnpm-lock.yaml` pinned and CI-friendly (no floating versions).
 - [ ] Add `pnpm lint` + minimal TS checks (typecheck) across packages.
 - [ ] Add a consistent error UI pattern (toast + inline error details).
 - [ ] Add `undo/redo` foundations (command stack) for all page edits.
@@ -14,8 +14,10 @@ It is organized by milestones and designed to be executed incrementally with con
 ## Milestone 1 — Editor Model (schema + rendering)
 
 - [ ] Expand `@cac/shared` schema:
-  - [ ] Section-level settings: layout (stack/grid), spacing, background, visibility.
-  - [ ] Component-level settings: style tokens (typography, spacing, alignment).
+  - [x] Section style: background, padding, max-width.
+  - [ ] Section-level settings: layout (stack/grid), spacing, visibility.
+  - [x] Image component style: fit, align, max-width, radius.
+  - [ ] Component-level settings: style tokens (typography, spacing, alignment) for all components.
   - [ ] Strong defaults (required-but-nullable where needed for structured outputs).
 - [ ] Renderer parity:
   - [ ] Keep `web Preview` and `server export` rendering aligned (same semantics).
@@ -28,7 +30,8 @@ It is organized by milestones and designed to be executed incrementally with con
   - [ ] Drag sections directly in Preview (optional).
 - [ ] Components:
   - [x] Reorder within a section (Inspector + Preview).
-  - [ ] Move components across sections (Preview drop zones + Structure list).
+  - [x] Move components across sections (Preview drop zones).
+  - [ ] Move components across sections via Structure list (optional).
   - [ ] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [ ] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
@@ -57,13 +60,11 @@ It is organized by milestones and designed to be executed incrementally with con
   - [ ] Replace an existing image asset file (keep same `asset.id`).
   - [ ] Set image focal point (x/y) for cropping & cover.
 - [ ] Image editor (MVP):
-  - [ ] Modal editor with:
-    - [ ] zoom
-    - [ ] pan
-    - [ ] crop rectangle (free + presets: 1:1, 4:3, 16:9)
-    - [ ] resize output (max width)
-  - [ ] Non-destructive workflow (store original + derived variants).
-  - [ ] “Update image in preview” UX (select image → Edit/Replace buttons).
+  - [x] Modal editor with zoom/pan/crop presets + output resize.
+  - [x] Non-destructive workflow (save as new asset + optional replace usages).
+  - [x] “Update image in preview” UX (select image → Edit/Replace buttons).
+  - [ ] Crop rectangle resize handles + keyboard nudges (optional UX upgrade).
+  - [ ] Rotate / flip (optional).
 
 ## Milestone 5 — Visual Styling (pleasant, powerful)
 
@@ -86,10 +87,12 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Screenshot pipeline + pass image to agent (vision).
   - [ ] Add markup snapshot (rendered HTML excerpt) + diff summary.
 - [ ] Controls:
+  - [x] Mic STT input for prompt (browser SpeechRecognition).
   - [ ] “Suggest” mode (draft plan + changes summary) vs “Apply” mode.
   - [ ] Step-by-step edits (agent proposes patches, user approves each).
 - [ ] Reliability:
   - [x] Guard: no implicit deletions.
+  - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.
   - [ ] Guard: limit change magnitude unless user asks (diff budget).
   - [ ] Prompt templates per component type.
 - [ ] Tools:
@@ -109,10 +112,12 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [x] Playwright: core E2E flows.
 - [ ] Add E2E coverage for:
-  - [ ] cross-section DnD move
-  - [ ] image replace/edit
+  - [x] cross-section DnD move
+  - [x] image replace
+  - [x] image edit (styles + editor)
   - [ ] style edits + export correctness
   - [ ] agent run (skip if no key)
+  - [x] screenshot capture (enable via `CAC_E2E_SCREENSHOT=1`)
 - [ ] ChromeDev MCP “manual script” checklist:
   - [ ] drag, edit, upload, screenshot, agent edit, export.
 
@@ -121,4 +126,3 @@ It is organized by milestones and designed to be executed incrementally with con
 - [ ] Production runbook (systemd unit + reverse proxy).
 - [ ] Serve web build from server (optional single-process deploy).
 - [ ] Backups for `projects/` directory.
-
