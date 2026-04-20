@@ -14,7 +14,7 @@ import { useToast } from "./toast.js";
 type LoadState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ready"; page: Page }
+  | { kind: "ready"; editor: { page: Page; past: Page[]; future: Page[] } }
   | { kind: "error"; message: string };
 
 type ImageEditorState =
@@ -34,6 +34,7 @@ type ImageEditorState =
 type PaletteTab = "project" | "agent" | "add" | "assets";
 
 const DEFAULT_PROJECT_ID = "demo";
+const UNDO_LIMIT = 50;
 
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -384,9 +385,11 @@ export function App() {
   const [screenshotError, setScreenshotError] = useState<string | null>(null);
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const page = state.kind === "ready" ? state.page : null;
+  const page = state.kind === "ready" ? state.editor.page : null;
   const canEdit = state.kind === "ready" && loadedProjectId === projectId;
   const activeProjectId = loadedProjectId;
+  const canUndo = canEdit && state.kind === "ready" && state.editor.past.length > 0;
+  const canRedo = canEdit && state.kind === "ready" && state.editor.future.length > 0;
 
   const imageAssets = useMemo(() => {
     if (!page) return [];
@@ -424,7 +427,7 @@ export function App() {
     setState({ kind: "loading" });
     try {
       const next = await apiGetPage(effectiveProjectId);
-      setState({ kind: "ready", page: next });
+      setState({ kind: "ready", editor: { page: next, past: [], future: [] } });
       setLoadedProjectId(effectiveProjectId);
       setSelected(null);
       void refreshProjects();
@@ -459,12 +462,76 @@ export function App() {
     }
   }, [page, projectId, toast]);
 
-  const updatePage = useCallback((updater: (prev: Page) => Page) => {
+  const updatePage = useCallback((updater: (prev: Page) => Page, options?: { recordUndo?: boolean }) => {
+    const recordUndo = options?.recordUndo ?? true;
     setState((prev) => {
       if (prev.kind !== "ready") return prev;
-      return { kind: "ready", page: updater(prev.page) };
+      const current = prev.editor.page;
+      const next = updater(current);
+      if (Object.is(next, current)) return prev;
+      if (!recordUndo) return { kind: "ready", editor: { ...prev.editor, page: next } };
+      const past = [...prev.editor.past, current].slice(-UNDO_LIMIT);
+      return { kind: "ready", editor: { page: next, past, future: [] } };
     });
   }, []);
+
+  const undo = useCallback(() => {
+    setState((prev) => {
+      if (prev.kind !== "ready") return prev;
+      const { past, future, page } = prev.editor;
+      const previous = past[past.length - 1];
+      if (!previous) return prev;
+      const nextPast = past.slice(0, -1);
+      const nextFuture = [page, ...future].slice(0, UNDO_LIMIT);
+      return { kind: "ready", editor: { page: previous, past: nextPast, future: nextFuture } };
+    });
+    setSelected(null);
+  }, []);
+
+  const redo = useCallback(() => {
+    setState((prev) => {
+      if (prev.kind !== "ready") return prev;
+      const { past, future, page } = prev.editor;
+      const next = future[0];
+      if (!next) return prev;
+      const nextPast = [...past, page].slice(-UNDO_LIMIT);
+      const nextFuture = future.slice(1);
+      return { kind: "ready", editor: { page: next, past: nextPast, future: nextFuture } };
+    });
+    setSelected(null);
+  }, []);
+
+  useEffect(() => {
+    if (!canEdit || isSaving) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        if (target.isContentEditable) return;
+        if (target.closest("input,textarea,select,[contenteditable='true']")) return;
+      }
+
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+
+      if (e.key.toLowerCase() === "z" && !e.shiftKey) {
+        if (!canUndo) return;
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      if ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y") {
+        if (!canRedo) return;
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canEdit, canRedo, canUndo, isSaving, redo, undo]);
 
   const updateComponentInPage = useCallback(
     (sectionId: string, componentId: string, updater: (prev: Component) => Component) => {
@@ -653,7 +720,7 @@ export function App() {
 
       const result = await apiAgentChat(activeProjectId, trimmed, latestScreenshotUrl);
       setAgentReply(result.assistantMessage);
-      setState({ kind: "ready", page: result.page });
+      updatePage(() => result.page, { recordUndo: true });
       setSelected(null);
       toast.success("Agent applied changes");
     } catch (error) {
@@ -663,7 +730,7 @@ export function App() {
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt, toast]);
+  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt, toast, updatePage]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
@@ -866,6 +933,17 @@ export function App() {
 
                       <div className="card">
                         <div className="cardTitle">Save / Export</div>
+                        <div className="row">
+                          <button className="btn" data-testid="undo-page" onClick={() => undo()} disabled={!canUndo || isSaving}>
+                            Undo
+                          </button>
+                          <button className="btn" data-testid="redo-page" onClick={() => redo()} disabled={!canRedo || isSaving}>
+                            Redo
+                          </button>
+                          <div className="muted" style={{ marginLeft: "auto" }}>
+                            Ctrl/⌘+Z, Ctrl/⌘+Shift+Z
+                          </div>
+                        </div>
                         <div className="row">
                           <button
                             className="btn btnPrimary"
@@ -1464,26 +1542,25 @@ export function App() {
             const alt = oldAsset && oldAsset.type === "image" ? oldAsset.alt : "";
             const newAsset = await apiUploadImage(activeProjectId, file, alt);
 
-            updatePage((prev) => PageSchema.parse({ ...prev, assets: [...prev.assets, newAsset] }));
+            updatePage((prev) => {
+              const nextAssets = [...prev.assets, newAsset];
+              const nextSections = prev.sections.map((s) => ({
+                ...s,
+                components: s.components.map((c) => {
+                  if (imageEditor.replaceAllUsages) {
+                    if (c.type === "hero" && c.backgroundImageAssetId === imageEditor.assetId) return { ...c, backgroundImageAssetId: newAsset.id };
+                    if (c.type === "image" && c.assetId === imageEditor.assetId) return { ...c, assetId: newAsset.id };
+                    return c;
+                  }
 
-            if (imageEditor.kind === "component") {
-              updatePage((prev) => {
-                const nextSections = prev.sections.map((s) => {
-                  if (s.id !== imageEditor.sectionId) return s;
-                  return {
-                    ...s,
-                    components: s.components.map((c) =>
-                      c.id === imageEditor.componentId && c.type === "image" ? { ...c, assetId: newAsset.id } : c
-                    ),
-                  };
-                });
-                return PageSchema.parse({ ...prev, sections: nextSections });
-              });
-            }
-
-            if (imageEditor.replaceAllUsages) {
-              replaceAssetIdUsagesInPage(imageEditor.assetId, newAsset.id);
-            }
+                  if (imageEditor.kind === "component" && s.id === imageEditor.sectionId) {
+                    if (c.id === imageEditor.componentId && c.type === "image") return { ...c, assetId: newAsset.id };
+                  }
+                  return c;
+                }),
+              }));
+              return PageSchema.parse({ ...prev, assets: nextAssets, sections: nextSections });
+            });
 
             setImageEditor(null);
           }}

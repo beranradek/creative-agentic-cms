@@ -66,6 +66,50 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
 });
 
+test("undo/redo works for adding a hero section", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_undo_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await expect(page.getByTestId("preview-item")).toHaveCount(1);
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("undo-page").click();
+  await expect(page.getByTestId("preview-item")).toHaveCount(0);
+
+  await page.getByTestId("redo-page").click();
+  await expect(page.getByTestId("preview-item")).toHaveCount(1);
+});
+
+test("keyboard shortcuts undo/redo work (and don't hijack contenteditable)", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_undo_keys_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await expect(page.getByTestId("preview-item")).toHaveCount(1);
+
+  await ensurePaletteTab(page, "project");
+  await page.locator("body").click({ position: { x: 10, y: 10 } });
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByTestId("preview-item")).toHaveCount(0);
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByTestId("preview-item")).toHaveCount(1);
+
+  await page.locator('[data-testid="preview-item"][data-component-type="hero"]').click();
+  await page.locator(".hero h1").click();
+  await page.keyboard.type(" X");
+
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByTestId("preview-item")).toHaveCount(1);
+});
+
 test("sections can be reordered via drag and drop (Structure panel)", async ({ page }) => {
   await page.goto("/");
 

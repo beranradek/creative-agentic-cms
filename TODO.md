@@ -6,9 +6,9 @@ It is organized by milestones and designed to be executed incrementally with con
 ## Milestone 0 — Foundations (keep velocity high)
 
 - [x] Keep `pnpm-lock.yaml` pinned and CI-friendly (no floating versions).
-- [ ] Add `pnpm lint` + minimal TS checks (typecheck) across packages.
-- [ ] Add a consistent error UI pattern (toast + inline error details).
-- [ ] Add `undo/redo` foundations (command stack) for all page edits.
+- [x] Add `pnpm lint` + minimal TS checks (typecheck) across packages (TS-only for now).
+- [x] Add a consistent error UI pattern (toast + inline error details).
+- [x] Add `undo/redo` foundations (snapshot history; transactions TBD) for all page edits.
 - [ ] Add autosave (debounced) + explicit “Save now” + conflict handling (future).
 
 ## Milestone 1 — Editor Model (schema + rendering)
