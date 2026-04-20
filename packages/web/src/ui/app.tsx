@@ -214,15 +214,40 @@ async function apiPutPage(projectId: string, page: Page): Promise<void> {
   if (!res.ok) throw new Error(`Failed to save page (${res.status})`);
 }
 
+const DiffSummarySchema = z.object({
+  sections: z.object({
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    reordered: z.boolean(),
+    changed: z.number().int().nonnegative(),
+  }),
+  components: z.object({
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    movedBetweenSections: z.number().int().nonnegative(),
+    reorderedWithinSections: z.number().int().nonnegative(),
+    changed: z.number().int().nonnegative(),
+  }),
+  assets: z.object({
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    changed: z.number().int().nonnegative(),
+  }),
+  approxJsonDeltaChars: z.number().int().nonnegative(),
+});
+
+type DiffSummary = z.infer<typeof DiffSummarySchema>;
+
 async function apiAgentChat(
   projectId: string,
   message: string,
+  mode: "suggest" | "apply",
   screenshotUrl?: string
-): Promise<{ assistantMessage: string; page: Page }> {
+): Promise<{ assistantMessage: string; applied: boolean; page: Page; proposedPage?: Page; diffSummary?: DiffSummary }> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, screenshotUrl }),
+    body: JSON.stringify({ message, mode, screenshotUrl }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
@@ -230,8 +255,36 @@ async function apiAgentChat(
     throw new Error(err);
   }
   const assistantMessage = z.string().parse((json as { assistantMessage?: unknown }).assistantMessage);
-  const nextPage = PageSchema.parse((json as { page?: unknown }).page);
-  return { assistantMessage, page: nextPage };
+  const applied = z.boolean().parse((json as { applied?: unknown }).applied);
+  const page = PageSchema.parse((json as { page?: unknown }).page);
+  const proposedPageRaw = (json as { proposedPage?: unknown }).proposedPage;
+  const proposedPage = typeof proposedPageRaw === "undefined" ? undefined : PageSchema.parse(proposedPageRaw);
+  const diffSummaryRaw = (json as { diffSummary?: unknown }).diffSummary;
+  const diffSummary = typeof diffSummaryRaw === "undefined" ? undefined : DiffSummarySchema.parse(diffSummaryRaw);
+  const base = { assistantMessage, applied, page };
+  const withProposal = proposedPage ? { ...base, proposedPage } : base;
+  return diffSummary ? { ...withProposal, diffSummary } : withProposal;
+}
+
+async function apiApplyAgentProposal(
+  projectId: string,
+  message: string,
+  basePage: Page,
+  proposedPage: Page
+): Promise<{ page: Page; diffSummary: DiffSummary }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/apply`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, basePage, proposedPage }),
+  });
+  const json = (await res.json()) as unknown;
+  if (!res.ok) {
+    const err = (json as { error?: string }).error ?? `Agent apply error (${res.status})`;
+    throw new Error(err);
+  }
+  const page = PageSchema.parse((json as { page?: unknown }).page);
+  const diffSummary = DiffSummarySchema.parse((json as { diffSummary?: unknown }).diffSummary);
+  return { page, diffSummary };
 }
 
 async function apiUploadImage(projectId: string, file: File, alt?: string) {
@@ -359,6 +412,14 @@ export function App() {
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const lastSavedJsonRef = useRef<string | null>(null);
+  const [lastSavedAtMs, setLastSavedAtMs] = useState<number | null>(null);
+  const [autosaveEnabled, setAutosaveEnabled] = useState(true);
+  const [isAutosaving, setIsAutosaving] = useState(false);
+  const [autosaveError, setAutosaveError] = useState<string | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const autosaveTokenRef = useRef(0);
+  const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
   const [agentText, setAgentText] = useState("");
@@ -377,6 +438,12 @@ export function App() {
   const [agentReply, setAgentReply] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const [agentRunMode, setAgentRunMode] = useState<"apply" | "suggest">("apply");
+  const [agentProposal, setAgentProposal] = useState<Page | null>(null);
+  const [agentProposalBasePage, setAgentProposalBasePage] = useState<Page | null>(null);
+  const [agentProposalBaseJson, setAgentProposalBaseJson] = useState<string | null>(null);
+  const [agentProposalMessage, setAgentProposalMessage] = useState<string | null>(null);
+  const [agentDiffSummary, setAgentDiffSummary] = useState<DiffSummary | null>(null);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -385,7 +452,11 @@ export function App() {
   const [screenshotError, setScreenshotError] = useState<string | null>(null);
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const latestPageRef = useRef<Page | null>(null);
+  const latestPageJsonRef = useRef<string | null>(null);
   const page = state.kind === "ready" ? state.editor.page : null;
+  const pageJson = useMemo(() => (page ? JSON.stringify(page) : null), [page]);
+  const isDirty = pageJson !== null && lastSavedJsonRef.current !== pageJson;
   const canEdit = state.kind === "ready" && loadedProjectId === projectId;
   const activeProjectId = loadedProjectId;
   const canUndo = canEdit && state.kind === "ready" && state.editor.past.length > 0;
@@ -428,8 +499,18 @@ export function App() {
     try {
       const next = await apiGetPage(effectiveProjectId);
       setState({ kind: "ready", editor: { page: next, past: [], future: [] } });
+      lastSavedJsonRef.current = JSON.stringify(next);
+      setLastSavedAtMs(Date.now());
+      setAutosaveError(null);
       setLoadedProjectId(effectiveProjectId);
       setSelected(null);
+      setAgentReply(null);
+      setAgentError(null);
+      setAgentProposal(null);
+      setAgentProposalBasePage(null);
+      setAgentProposalBaseJson(null);
+      setAgentProposalMessage(null);
+      setAgentDiffSummary(null);
       void refreshProjects();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -446,12 +527,48 @@ export function App() {
     void refreshProjects();
   }, [refreshProjects]);
 
+  useEffect(() => {
+    latestPageRef.current = page;
+    latestPageJsonRef.current = pageJson;
+  }, [page, pageJson]);
+
+  const flushAutosaveTimer = useCallback(() => {
+    autosaveTokenRef.current += 1;
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = null;
+  }, []);
+
+  const persistPage = useCallback(
+    async (pageToSave: Page) => {
+      const json = JSON.stringify(pageToSave);
+      const run = async () => {
+        await apiPutPage(projectId, pageToSave);
+        lastSavedJsonRef.current = json;
+        setLastSavedAtMs(Date.now());
+        setAutosaveError(null);
+      };
+      persistQueueRef.current = persistQueueRef.current.then(run, run);
+      await persistQueueRef.current;
+    },
+    [projectId]
+  );
+
+  const ensureSaved = useCallback(
+    async (pageToSave: Page) => {
+      if (!isDirty) return;
+      flushAutosaveTimer();
+      await persistPage(pageToSave);
+    },
+    [flushAutosaveTimer, isDirty, persistPage]
+  );
+
   const save = useCallback(async () => {
     if (!page) return;
+    flushAutosaveTimer();
     setIsSaving(true);
     setSaveError(null);
     try {
-      await apiPutPage(projectId, page);
+      await persistPage(page);
       toast.success("Saved", `projects/${projectId}/page.json`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -460,7 +577,53 @@ export function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [page, projectId, toast]);
+  }, [flushAutosaveTimer, page, persistPage, projectId, toast]);
+
+  useEffect(() => {
+    if (!autosaveEnabled) return;
+    if (!canEdit) return;
+    if (!isDirty) return;
+    if (isSaving || isAutosaving || isExporting || isCapturingScreenshot || isAgentRunning) return;
+
+    if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+
+    const token = (autosaveTokenRef.current += 1);
+    autosaveTimerRef.current = window.setTimeout(() => {
+      if (token !== autosaveTokenRef.current) return;
+      const latest = latestPageRef.current;
+      const latestJson = latestPageJsonRef.current;
+      if (!latest || !latestJson) return;
+      if (lastSavedJsonRef.current === latestJson) return;
+
+      setIsAutosaving(true);
+      setAutosaveError(null);
+
+      void persistPage(latest)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setAutosaveError(message);
+          toast.error("Autosave failed", message);
+        })
+        .finally(() => {
+          setIsAutosaving(false);
+        });
+    }, 900);
+
+    return () => {
+      if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
+    };
+  }, [
+    autosaveEnabled,
+    canEdit,
+    isAgentRunning,
+    isAutosaving,
+    isCapturingScreenshot,
+    isDirty,
+    isExporting,
+    isSaving,
+    persistPage,
+    toast,
+  ]);
 
   const updatePage = useCallback((updater: (prev: Page) => Page, options?: { recordUndo?: boolean }) => {
     const recordUndo = options?.recordUndo ?? true;
@@ -512,6 +675,41 @@ export function App() {
         if (target.closest("input,textarea,select,[contenteditable='true']")) return;
       }
 
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && selected) {
+        const dir = e.key === "ArrowUp" ? -1 : 1;
+        e.preventDefault();
+        updatePage((prev) => {
+          if (selected.componentId) {
+            const nextSections = prev.sections.map((section) => {
+              if (section.id !== selected.sectionId) return section;
+              const idx = section.components.findIndex((c) => c.id === selected.componentId);
+              if (idx < 0) return section;
+              const nextIdx = idx + dir;
+              if (nextIdx < 0 || nextIdx >= section.components.length) return section;
+              const nextComponents = [...section.components];
+              const moved = nextComponents[idx];
+              if (!moved) return section;
+              nextComponents.splice(idx, 1);
+              nextComponents.splice(nextIdx, 0, moved);
+              return { ...section, components: nextComponents };
+            });
+            return PageSchema.parse({ ...prev, sections: nextSections });
+          }
+
+          const idx = prev.sections.findIndex((s) => s.id === selected.sectionId);
+          if (idx < 0) return prev;
+          const nextIdx = idx + dir;
+          if (nextIdx < 0 || nextIdx >= prev.sections.length) return prev;
+          const nextSections = [...prev.sections];
+          const moved = nextSections[idx];
+          if (!moved) return prev;
+          nextSections.splice(idx, 1);
+          nextSections.splice(nextIdx, 0, moved);
+          return PageSchema.parse({ ...prev, sections: nextSections });
+        });
+        return;
+      }
+
       const isMod = e.ctrlKey || e.metaKey;
       if (!isMod) return;
 
@@ -531,7 +729,7 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canEdit, canRedo, canUndo, isSaving, redo, undo]);
+  }, [canEdit, canRedo, canUndo, isSaving, redo, selected, undo, updatePage]);
 
   const updateComponentInPage = useCallback(
     (sectionId: string, componentId: string, updater: (prev: Component) => Component) => {
@@ -708,7 +906,19 @@ export function App() {
     if (isSttActive) stopAgentStt();
     setIsAgentRunning(true);
     setAgentError(null);
+    setAgentProposal(null);
+    setAgentProposalBasePage(null);
+    setAgentProposalBaseJson(null);
+    setAgentProposalMessage(null);
+    setAgentDiffSummary(null);
     try {
+      await ensureSaved(page);
+
+      const baseJson = latestPageJsonRef.current;
+      if (!baseJson) {
+        throw new Error("Internal error: missing base page snapshot for agent run.");
+      }
+
       let latestScreenshotUrl: string | undefined;
       try {
         const shot = await apiCaptureScreenshot(activeProjectId, { width: 1024, height: 768, fullPage: false });
@@ -718,11 +928,30 @@ export function App() {
         // Best-effort: continue without screenshot (server might not have Playwright installed).
       }
 
-      const result = await apiAgentChat(activeProjectId, trimmed, latestScreenshotUrl);
+      const result = await apiAgentChat(activeProjectId, trimmed, agentRunMode, latestScreenshotUrl);
       setAgentReply(result.assistantMessage);
-      updatePage(() => result.page, { recordUndo: true });
-      setSelected(null);
-      toast.success("Agent applied changes");
+      setAgentDiffSummary(result.diffSummary ?? null);
+      if (latestPageJsonRef.current !== baseJson) {
+        setAgentError("Page changed while the agent was running. Result discarded (rerun the agent).");
+        toast.error("Agent result discarded", "Page changed while running.");
+        return;
+      }
+      if (result.applied) {
+        updatePage(() => result.page, { recordUndo: true });
+        lastSavedJsonRef.current = JSON.stringify(result.page);
+        setLastSavedAtMs(Date.now());
+        setAutosaveError(null);
+        setSelected(null);
+        toast.success("Agent applied changes");
+      } else if (result.proposedPage) {
+        setAgentProposal(result.proposedPage);
+        setAgentProposalBasePage(page);
+        setAgentProposalBaseJson(baseJson);
+        setAgentProposalMessage(trimmed);
+        toast.success("Agent suggested changes", "Review and apply when ready.");
+      } else {
+        toast.error("Agent returned no proposal");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setAgentError(message);
@@ -730,13 +959,58 @@ export function App() {
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentText, isSttActive, page, stopAgentStt, toast, updatePage]);
+  }, [activeProjectId, agentRunMode, agentText, ensureSaved, isSttActive, page, stopAgentStt, toast, updatePage]);
+
+  const applyAgentProposal = useCallback(async () => {
+    if (!agentProposal) return;
+    if (isSaving) return;
+    if (!agentProposalBasePage || !agentProposalMessage || !agentProposalBaseJson) {
+      toast.error("Cannot apply suggestion", "Missing base state (rerun the agent).");
+      return;
+    }
+    if (latestPageJsonRef.current !== agentProposalBaseJson) {
+      toast.error("Cannot apply suggestion", "Page changed since suggestion (rerun the agent).");
+      return;
+    }
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const result = await apiApplyAgentProposal(activeProjectId, agentProposalMessage, agentProposalBasePage, agentProposal);
+      updatePage(() => result.page, { recordUndo: true });
+      lastSavedJsonRef.current = JSON.stringify(result.page);
+      setLastSavedAtMs(Date.now());
+      setAutosaveError(null);
+      setAgentDiffSummary(result.diffSummary);
+      setAgentProposal(null);
+      setAgentProposalBasePage(null);
+      setAgentProposalBaseJson(null);
+      setAgentProposalMessage(null);
+      setSelected(null);
+      toast.success("Applied suggestion", `projects/${activeProjectId}/page.json`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setSaveError(message);
+      toast.error("Apply failed", message);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    activeProjectId,
+    agentProposal,
+    agentProposalBaseJson,
+    agentProposalBasePage,
+    agentProposalMessage,
+    isSaving,
+    toast,
+    updatePage,
+  ]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
     setIsExporting(true);
     setExportError(null);
     try {
+      await ensureSaved(page);
       const result = await apiExport(activeProjectId);
       setExportInfo(result.outputDir);
       toast.success("Exported", result.outputDir);
@@ -747,12 +1021,13 @@ export function App() {
     } finally {
       setIsExporting(false);
     }
-  }, [activeProjectId, page, toast]);
+  }, [activeProjectId, ensureSaved, page, toast]);
 
   const captureScreenshot = useCallback(async () => {
     setIsCapturingScreenshot(true);
     setScreenshotError(null);
     try {
+      if (page) await ensureSaved(page);
       const result = await apiCaptureScreenshot(activeProjectId, { width: 1200, height: 720, fullPage: true });
       setScreenshotUrl(result.screenshotUrl);
       toast.success("Screenshot captured");
@@ -763,7 +1038,7 @@ export function App() {
     } finally {
       setIsCapturingScreenshot(false);
     }
-  }, [activeProjectId, toast]);
+  }, [activeProjectId, ensureSaved, page, toast]);
 
   const openPaletteTab = useCallback((tab: PaletteTab) => {
     setPaletteTab((current) => {
@@ -966,6 +1241,35 @@ export function App() {
                         <div className="muted">
                           Writes to <code>projects/&lt;projectId&gt;/page.json</code>.
                         </div>
+                        <div className="row" style={{ marginTop: 10, alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                          <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={autosaveEnabled}
+                              onChange={(e) => setAutosaveEnabled(e.target.checked)}
+                              disabled={!canEdit}
+                            />
+                            <span className="muted">Autosave</span>
+                          </label>
+                          {isAutosaving ? (
+                            <span className="badge">autosaving…</span>
+                          ) : isDirty ? (
+                            <span className="badge">unsaved</span>
+                          ) : (
+                            <span className="badge" style={{ opacity: 0.8 }}>
+                              saved
+                            </span>
+                          )}
+                          {lastSavedAtMs ? (
+                            <span className="muted">Last saved: {new Date(lastSavedAtMs).toLocaleTimeString()}</span>
+                          ) : null}
+                        </div>
+                        {autosaveError ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Autosave error</div>
+                            <div>{autosaveError}</div>
+                          </div>
+                        ) : null}
                         <div className="row" style={{ marginTop: 10 }}>
                           <button
                             className="btn"
@@ -1064,6 +1368,17 @@ export function App() {
                                 <option value="replace">replace</option>
                               </select>
                             </div>
+                            <div className="field" style={{ width: 160 }}>
+                              <label>Run</label>
+                              <select
+                                value={agentRunMode}
+                                onChange={(e) => setAgentRunMode(e.target.value === "suggest" ? "suggest" : "apply")}
+                                disabled={isAgentRunning}
+                              >
+                                <option value="apply">apply</option>
+                                <option value="suggest">suggest</option>
+                              </select>
+                            </div>
                             {sttInterim ? <span className="badge">listening…</span> : null}
                           </div>
                         </div>
@@ -1081,16 +1396,57 @@ export function App() {
                           onClick={() => void runAgent()}
                           disabled={!page || isAgentRunning}
                         >
-                          {isAgentRunning ? "Running..." : "Run agent"}
+                          {isAgentRunning ? "Running..." : agentRunMode === "suggest" ? "Suggest changes" : "Run agent"}
                         </button>
-                        <button className="btn" onClick={() => setAgentReply(null)} disabled={!agentReply}>
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            setAgentReply(null);
+                            setAgentError(null);
+                            setAgentProposal(null);
+                            setAgentProposalBasePage(null);
+                            setAgentProposalBaseJson(null);
+                            setAgentProposalMessage(null);
+                            setAgentDiffSummary(null);
+                          }}
+                          disabled={!agentReply && !agentError && !agentProposal && !agentDiffSummary}
+                        >
                           Clear reply
                         </button>
                       </div>
+                      {agentProposal ? (
+                        <div className="row" style={{ marginTop: 10 }}>
+                          <button className="btn btnPrimary" onClick={() => void applyAgentProposal()} disabled={isSaving || isAgentRunning}>
+                            Apply suggestion
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              setAgentProposal(null);
+                              setAgentProposalBasePage(null);
+                              setAgentProposalBaseJson(null);
+                              setAgentProposalMessage(null);
+                              setAgentDiffSummary(null);
+                            }}
+                            disabled={isSaving || isAgentRunning}
+                          >
+                            Discard
+                          </button>
+                        </div>
+                      ) : null}
                       {agentError ? (
                         <div className="errorBox" style={{ marginTop: 10 }}>
                           <div className="errorBoxTitle">Agent error</div>
                           <div>{agentError}</div>
+                        </div>
+                      ) : null}
+                      {agentDiffSummary ? (
+                        <div className="muted" style={{ marginTop: 10 }}>
+                          Diff: sections +{agentDiffSummary.sections.added}/-{agentDiffSummary.sections.removed}, components +{agentDiffSummary.components.added}
+                          /-{agentDiffSummary.components.removed}, moved {agentDiffSummary.components.movedBetweenSections}, edited{" "}
+                          {agentDiffSummary.components.changed}, reorders s:{agentDiffSummary.sections.reordered ? "yes" : "no"} c:
+                          {agentDiffSummary.components.reorderedWithinSections}; assets +{agentDiffSummary.assets.added}/-{agentDiffSummary.assets.removed}; JSON Δ{" "}
+                          {agentDiffSummary.approxJsonDeltaChars}
                         </div>
                       ) : null}
                       {agentReply ? <div className="muted">{agentReply}</div> : <div className="muted">Uses `OPENAI_API_KEY` from `.env`.</div>}

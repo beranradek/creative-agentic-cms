@@ -9,7 +9,8 @@ It is organized by milestones and designed to be executed incrementally with con
 - [x] Add `pnpm lint` + minimal TS checks (typecheck) across packages (TS-only for now).
 - [x] Add a consistent error UI pattern (toast + inline error details).
 - [x] Add `undo/redo` foundations (snapshot history; transactions TBD) for all page edits.
-- [ ] Add autosave (debounced) + explicit “Save now” + conflict handling (future).
+- [x] Add autosave (debounced) + explicit “Save now”.
+- [ ] Add conflict handling (future).
 
 ## Milestone 1 — Editor Model (schema + rendering)
 
@@ -33,7 +34,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Move components across sections (Preview drop zones).
   - [ ] Move components across sections via Structure list (optional).
   - [ ] Insert indicators (drop marker line) + auto-scroll while dragging.
-  - [ ] Keyboard reordering (Alt+↑/↓).
+  - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
   - [ ] Shift/Cmd selection of multiple components.
   - [ ] Drag group between sections.
@@ -85,15 +86,15 @@ It is organized by milestones and designed to be executed incrementally with con
 - [ ] Context:
   - [x] Page snapshot text.
   - [x] Screenshot pipeline + pass image to agent (vision).
-  - [ ] Add markup snapshot (rendered HTML excerpt) + diff summary.
+  - [x] Add markup snapshot (rendered HTML excerpt) + diff summary.
 - [ ] Controls:
   - [x] Mic STT input for prompt (browser SpeechRecognition).
-  - [ ] “Suggest” mode (draft plan + changes summary) vs “Apply” mode.
+  - [x] “Suggest” mode (draft plan + changes summary) vs “Apply” mode.
   - [ ] Step-by-step edits (agent proposes patches, user approves each).
 - [ ] Reliability:
   - [x] Guard: no implicit deletions.
   - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.
-  - [ ] Guard: limit change magnitude unless user asks (diff budget).
+  - [x] Guard: limit change magnitude unless user asks (diff budget).
   - [ ] Prompt templates per component type.
 - [ ] Tools:
   - [ ] Agent can request a refreshed screenshot.

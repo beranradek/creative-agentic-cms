@@ -10,6 +10,7 @@ const AgentInputSchema = z.object({
   page: PageSchema,
   screenshotUrl: z.string().min(1).optional(),
   screenshotPngBase64: z.string().min(1).optional(),
+  markupHtmlExcerpt: z.string().min(1).optional(),
 });
 
 export type AgentInput = z.infer<typeof AgentInputSchema>;
@@ -149,6 +150,9 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
 
 Page snapshot (for fast understanding):
 ${buildPageSnapshot(parsed.page)}
+
+Rendered HTML excerpt (from current page render):
+${parsed.markupHtmlExcerpt ?? "(not available)"}
 
 Latest screenshot (rendered preview):
 ${parsed.screenshotUrl ?? "(not available)"}

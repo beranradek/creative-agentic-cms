@@ -2,19 +2,78 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import express from "express";
 import { z, type ZodType } from "zod";
-import { CircuitBreakerOpenError, runCmsAgent } from "@cac/agent";
+import { CircuitBreakerOpenError, runCmsAgent, summarizePageDiff, validateAgentEdit, type DiffBudget } from "@cac/agent";
 import { PageSchema } from "@cac/shared";
 import { createDefaultPage } from "../default-page.js";
 import type { ProjectStore } from "../project-store.js";
+import { renderPageHtml } from "../render/render-page.js";
 
 interface CreateAgentRouterOptions {
   store: ProjectStore;
   projectIdSchema: ZodType<string>;
 }
 
+function truncate(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(0, maxChars - 1)) + "…";
+}
+
+function extractMarkupExcerpt(html: string, maxChars: number): string {
+  const start = html.indexOf("<main");
+  const end = html.indexOf("</main>");
+  const excerpt = start >= 0 && end > start ? html.slice(start, end + "</main>".length) : html;
+  return truncate(excerpt.replace(/\s+\n/g, "\n").trim(), maxChars);
+}
+
 export function createAgentRouter(options: CreateAgentRouterOptions): express.Router {
   const { store, projectIdSchema } = options;
   const router = express.Router({ mergeParams: true });
+
+  router.post("/apply", async (req, res) => {
+    const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
+    const body = z
+      .object({
+        message: z.string().min(1),
+        basePage: PageSchema,
+        proposedPage: PageSchema,
+      })
+      .parse(req.body);
+
+    let currentPage;
+    try {
+      currentPage = await store.readPage(projectId);
+    } catch {
+      currentPage = createDefaultPage();
+    }
+
+    if (JSON.stringify(currentPage) !== JSON.stringify(body.basePage)) {
+      res.status(409).json({ error: "Page changed since suggestion. Reload and rerun the agent." });
+      return;
+    }
+
+    const budget: DiffBudget = {
+      maxSectionAdds: 1,
+      maxSectionDeletes: 0,
+      maxSectionEdits: 4,
+      maxComponentAdds: 4,
+      maxComponentDeletes: 0,
+      maxComponentMovesBetweenSections: 2,
+      maxComponentEdits: 10,
+      maxAssetAdds: 4,
+      maxAssetDeletes: 0,
+      maxAssetEdits: 6,
+      maxApproxJsonDeltaChars: 25_000,
+    };
+
+    try {
+      const { summary } = validateAgentEdit(body.basePage, body.proposedPage, body.message, { budget });
+      await store.writePage(projectId, body.proposedPage);
+      res.json({ ok: true, applied: true, page: body.proposedPage, diffSummary: summary });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Agent edit rejected by guardrails.";
+      res.status(400).json({ error: message });
+    }
+  });
 
   router.post("/chat", async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
@@ -22,6 +81,7 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
       .object({
         message: z.string().min(1),
         screenshotUrl: z.string().min(1).optional(),
+        mode: z.enum(["suggest", "apply"]).optional().default("apply"),
       })
       .parse(req.body);
 
@@ -52,17 +112,54 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
         }
       }
 
+      const { html } = renderPageHtml(page);
+      const markupHtmlExcerpt = extractMarkupExcerpt(html, 6_000);
+
       const output = await runCmsAgent({
         userMessage: body.message,
         projectId,
         page,
         screenshotUrl: body.screenshotUrl,
         screenshotPngBase64,
+        markupHtmlExcerpt,
       });
 
       const nextPage = PageSchema.parse(output.page);
-      await store.writePage(projectId, nextPage);
-      res.json({ assistantMessage: output.assistantMessage, page: nextPage });
+      if (body.mode === "apply") {
+        const budget: DiffBudget = {
+          maxSectionAdds: 1,
+          maxSectionDeletes: 0,
+          maxSectionEdits: 4,
+          maxComponentAdds: 4,
+          maxComponentDeletes: 0,
+          maxComponentMovesBetweenSections: 2,
+          maxComponentEdits: 10,
+          maxAssetAdds: 4,
+          maxAssetDeletes: 0,
+          maxAssetEdits: 6,
+          maxApproxJsonDeltaChars: 25_000,
+        };
+
+        try {
+          const { summary } = validateAgentEdit(page, nextPage, body.message, { budget });
+          await store.writePage(projectId, nextPage);
+          res.json({ assistantMessage: output.assistantMessage, applied: true, page: nextPage, diffSummary: summary });
+          return;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Agent edit rejected by guardrails.";
+          res.status(400).json({ error: message });
+          return;
+        }
+      } else {
+        const diffSummary = summarizePageDiff(page, nextPage);
+        res.json({
+          assistantMessage: output.assistantMessage,
+          applied: false,
+          page,
+          proposedPage: nextPage,
+          diffSummary,
+        });
+      }
     } catch (error) {
       if (error instanceof CircuitBreakerOpenError) {
         res.status(503).json({ error: "LLM temporarily unavailable", openUntilMs: error.openUntilMs });
