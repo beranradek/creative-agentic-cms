@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import multer from "multer";
@@ -72,6 +72,80 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
     });
 
     res.json({ asset });
+  });
+
+  router.post("/images/:assetId/replace", upload.single("file"), async (req, res) => {
+    const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
+    const assetId = z.string().min(1).parse((req.params as { assetId?: string }).assetId);
+
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: "Missing file" });
+      return;
+    }
+
+    const mimeType = z.string().min(1).parse(file.mimetype);
+    const ext = MimeToExt[mimeType];
+    if (!ext) {
+      res.status(415).json({ error: `Unsupported image type: ${mimeType}` });
+      return;
+    }
+
+    await store.ensureProject(projectId);
+    const assetsDir = store.getAssetsDir(projectId);
+    await mkdir(assetsDir, { recursive: true });
+
+    let page;
+    try {
+      page = await store.readPage(projectId);
+    } catch {
+      res.status(404).json({ error: "Project page not found" });
+      return;
+    }
+
+    const existingAsset = page.assets.find((a) => a.type === "image" && a.id === assetId);
+    if (!existingAsset || existingAsset.type !== "image") {
+      res.status(404).json({ error: "Asset not found" });
+      return;
+    }
+
+    const filename = `${assetId}${ext}`;
+    const targetPath = path.join(assetsDir, filename);
+    await writeFile(targetPath, file.buffer);
+
+    try {
+      const files = await readdir(assetsDir);
+      await Promise.all(
+        files
+          .filter((f) => f.startsWith(`${assetId}.`) && f !== filename)
+          .map(async (f) => {
+            try {
+              await unlink(path.join(assetsDir, f));
+            } catch {
+              // ignore
+            }
+          })
+      );
+    } catch {
+      // ignore cleanup failures
+    }
+
+    const dimensions = imageSize(file.buffer);
+    const updatedAsset = ImageAssetSchema.parse({
+      ...existingAsset,
+      filename,
+      mimeType,
+      width: dimensions.width ?? null,
+      height: dimensions.height ?? null,
+    });
+
+    const nextPage = {
+      ...page,
+      assets: page.assets.map((a) => (a.type === "image" && a.id === assetId ? updatedAsset : a)),
+    };
+    await store.writePage(projectId, nextPage);
+
+    res.json({ ok: true, asset: updatedAsset, page: nextPage });
   });
 
   return router;

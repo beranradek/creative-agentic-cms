@@ -49,8 +49,8 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] `hero` headline/subheadline inline.
   - [x] `contact_form` headline/submit inline.
   - [x] `rich_text` inline (contenteditable + sanitizer on blur).
-  - [ ] Inline CTA label edit (hero).
-  - [ ] Inline image caption edit.
+  - [x] Inline CTA label edit (hero).
+  - [x] Inline image caption edit.
   - [ ] True rich-text toolbar (bold/italic/link/lists) + safe paste sanitization.
 
 ## Milestone 4 — Assets & Image Editing
@@ -58,7 +58,7 @@ It is organized by milestones and designed to be executed incrementally with con
 - [ ] Asset library:
   - [x] Upload images + store in `projects/<id>/assets`.
   - [x] Edit alt text (stored in `page.json`).
-  - [ ] Replace an existing image asset file (keep same `asset.id`).
+  - [x] Replace an existing image asset file (keep same `asset.id`).
   - [ ] Set image focal point (x/y) for cropping & cover.
 - [ ] Image editor (MVP):
   - [x] Modal editor with zoom/pan/crop presets + output resize.

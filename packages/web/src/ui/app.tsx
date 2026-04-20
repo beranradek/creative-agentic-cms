@@ -4,6 +4,7 @@ import {
   AssetSchema,
   PageSchema,
   SECTION_MAX_WIDTHS,
+  type Asset,
   type Component,
   type Page,
   type Section,
@@ -299,6 +300,23 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   const json = (await res.json()) as unknown;
   const asset = (json as { asset?: unknown }).asset;
   return AssetSchema.parse(asset);
+}
+
+async function apiReplaceImageAsset(projectId: string, assetId: string, file: File): Promise<{ asset: Asset; page: Page }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/images/${encodeURIComponent(assetId)}/replace`,
+    { method: "POST", body: form }
+  );
+  const json = (await res.json()) as unknown;
+  if (!res.ok) {
+    const err = (json as { error?: string }).error ?? `Asset replace error (${res.status})`;
+    throw new Error(err);
+  }
+  const asset = AssetSchema.parse((json as { asset?: unknown }).asset);
+  const page = PageSchema.parse((json as { page?: unknown }).page);
+  return { asset, page };
 }
 
 async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
@@ -806,6 +824,21 @@ export function App() {
       return asset;
     },
     [activeProjectId, maxUploadPx, optimizeUploads, updatePage]
+  );
+
+  const replaceImageAssetFile = useCallback(
+    async (assetId: string, file: File) => {
+      if (!page) return;
+      flushAutosaveTimer();
+      const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
+      const result = await apiReplaceImageAsset(activeProjectId, assetId, toUpload);
+      updatePage(() => result.page, { recordUndo: true });
+      lastSavedJsonRef.current = JSON.stringify(result.page);
+      setLastSavedAtMs(Date.now());
+      setAutosaveError(null);
+      toast.success("Asset replaced", result.asset.filename);
+    },
+    [activeProjectId, flushAutosaveTimer, maxUploadPx, optimizeUploads, page, toast, updatePage]
   );
 
   const replaceAssetIdUsagesInPage = useCallback(
@@ -1548,7 +1581,31 @@ export function App() {
                                       }
                                     />
                                   </div>
-                                  <div className="row" style={{ paddingTop: 18 }}>
+                                  <div className="row" style={{ paddingTop: 18, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                    <label
+                                      className="btn"
+                                      style={!canEdit ? { opacity: 0.6, pointerEvents: "none" } : undefined}
+                                      data-testid="asset-replace-btn"
+                                    >
+                                      Replace file
+                                      <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        style={{ display: "none" }}
+                                        data-testid="asset-replace-input"
+                                        onChange={async (e) => {
+                                          const file = e.currentTarget.files?.[0];
+                                          e.currentTarget.value = "";
+                                          if (!file) return;
+                                          try {
+                                            await replaceImageAssetFile(asset.id, file);
+                                          } catch (error) {
+                                            const message = error instanceof Error ? error.message : "Unknown error";
+                                            toast.error("Replace failed", message);
+                                          }
+                                        }}
+                                      />
+                                    </label>
                                     <button
                                       className="btn"
                                       disabled={!canEdit}
@@ -2048,7 +2105,19 @@ function PreviewComponent(props: {
             {component.subheadline}
           </p>
           <a className="cta" href={component.primaryCtaHref} onClick={(e) => e.preventDefault()}>
-            {component.primaryCtaText}
+            <span
+              contentEditable={isSelected && canEdit}
+              suppressContentEditableWarning
+              onClick={(e) => (isSelected ? e.stopPropagation() : null)}
+              onBlur={(e) => {
+                if (!isSelected || !canEdit) return;
+                const next = sanitizeInlineText(e.currentTarget.innerText);
+                if (!next) return;
+                onUpdate({ ...component, primaryCtaText: next });
+              }}
+            >
+              {component.primaryCtaText}
+            </span>
           </a>
         </div>
       </div>
@@ -2227,7 +2296,24 @@ function PreviewComponent(props: {
         ) : null}
         <div className="imageBlock" style={blockStyle}>
           <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} style={imgStyle} />
-          {component.caption ? <div className="imageCaption">{component.caption}</div> : null}
+          {isSelected && canEdit ? (
+            <div
+              className="imageCaption"
+              contentEditable
+              suppressContentEditableWarning
+              onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                const raw = sanitizeInlineText(e.currentTarget.innerText);
+                const placeholder = "Add a caption…";
+                const next = component.caption ? raw : raw === placeholder ? "" : raw;
+                onUpdate({ ...component, caption: next });
+              }}
+            >
+              {component.caption || "Add a caption…"}
+            </div>
+          ) : component.caption ? (
+            <div className="imageCaption">{component.caption}</div>
+          ) : null}
         </div>
       </div>
     );

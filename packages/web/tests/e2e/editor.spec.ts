@@ -2,6 +2,16 @@ import { expect, test } from "@playwright/test";
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Gd0sAAAAASUVORK5CYII=";
+const PNG_2X2_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwHwyBNBAw/AcAR8oI+ItOQ4UAAAAASUVORK5CYII=";
+
+async function fetchPageJson(page: import("@playwright/test").Page, projectId: string) {
+  return await page.evaluate(async (pid) => {
+    const res = await fetch(`/api/projects/${encodeURIComponent(pid)}/page`);
+    const json = (await res.json()) as { page?: unknown };
+    return json.page;
+  }, projectId);
+}
 
 async function loadProject(page: import("@playwright/test").Page, projectId: string) {
   await ensurePaletteTab(page, "project");
@@ -352,6 +362,61 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   await page.getByTestId("reload-page").click();
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
   await expect(page.locator(".imageBlock img")).toHaveAttribute("src", afterReplace);
+});
+
+test("asset file can be replaced (keeps same asset id)", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_asset_replace_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "images");
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await ensurePaletteTab(page, "images");
+
+  type RawImageAsset = { type: "image"; id: string; width: number | null; height: number | null; filename: string };
+  type RawPage = {
+    assets?: RawImageAsset[];
+    sections?: Array<{ components?: Array<{ type: string; assetId?: string }> }>;
+  };
+
+  const pageBefore = (await fetchPageJson(page, projectId)) as RawPage;
+  const imgAssetBefore = (pageBefore.assets ?? []).find((a) => a.type === "image");
+  if (!imgAssetBefore) throw new Error("missing image asset before replace");
+  expect(imgAssetBefore.width).toBe(1);
+  expect(imgAssetBefore.height).toBe(1);
+
+  await page.getByTestId("asset-replace-input").first().setInputFiles({
+    name: "bigger.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_2X2_BASE64, "base64"),
+  });
+
+  await expect
+    .poll(async () => {
+      const p = (await fetchPageJson(page, projectId)) as RawPage;
+      const a = (p.assets ?? []).find((x) => x.type === "image" && x.id === imgAssetBefore.id);
+      return a ? { w: a.width, h: a.height } : null;
+    })
+    .toEqual({ w: 2, h: 2 });
+
+  const pageAfter = (await fetchPageJson(page, projectId)) as RawPage;
+  const imgAssetAfter = (pageAfter.assets ?? []).find((a) => a.type === "image" && a.id === imgAssetBefore.id);
+  if (!imgAssetAfter) throw new Error("missing image asset after replace");
+  expect(imgAssetAfter.id).toBe(imgAssetBefore.id);
+  expect(imgAssetAfter.filename).toBe(imgAssetBefore.filename);
+
+  const imageComponent = (pageAfter.sections ?? []).flatMap((s) => s.components ?? []).find((c) => c.type === "image");
+  if (!imageComponent) throw new Error("missing image component after replace");
+  expect(imageComponent.assetId).toBe(imgAssetBefore.id);
 });
 
 test("image style (radius + max width) persists", async ({ page }) => {
