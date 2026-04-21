@@ -206,21 +206,58 @@ function getDragPayload(e: React.DragEvent): DragPayload | null {
   return inMemoryDragPayload;
 }
 
-async function apiGetPage(projectId: string): Promise<Page> {
+function getEtagHeader(res: Response): string | null {
+  const raw = res.headers.get("etag");
+  if (!raw) return null;
+  const etag = raw.trim();
+  return etag.length ? etag : null;
+}
+
+class ApiConflictError extends Error {
+  public readonly serverPage: Page;
+  public readonly serverEtag: string | null;
+
+  public constructor(message: string, serverPage: Page, serverEtag: string | null) {
+    super(message);
+    this.name = "ApiConflictError";
+    this.serverPage = serverPage;
+    this.serverEtag = serverEtag;
+  }
+}
+
+async function apiGetPage(projectId: string): Promise<{ page: Page; etag: string | null }> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
   if (!res.ok) throw new Error(`Failed to load page (${res.status})`);
   const json = (await res.json()) as unknown;
   const page = (json as { page?: unknown }).page;
-  return PageSchema.parse(page);
+  return { page: PageSchema.parse(page), etag: getEtagHeader(res) };
 }
 
-async function apiPutPage(projectId: string, page: Page): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`, {
+async function apiPutPage(
+  projectId: string,
+  page: Page,
+  options?: { etag?: string | null; force?: boolean }
+): Promise<string | null> {
+  const query = options?.force ? "?force=1" : "";
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const etag = options?.etag ?? null;
+  if (etag) headers["if-match"] = etag;
+
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page${query}`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(page),
   });
-  if (!res.ok) throw new Error(`Failed to save page (${res.status})`);
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) {
+    const serverPageRaw = json && typeof json === "object" ? (json as { page?: unknown }).page : undefined;
+    if ((res.status === 409 || res.status === 412) && typeof serverPageRaw !== "undefined") {
+      const serverPage = PageSchema.parse(serverPageRaw);
+      throw new ApiConflictError("Page changed on disk (conflict).", serverPage, getEtagHeader(res));
+    }
+    throw new Error(`Failed to save page (${res.status})`);
+  }
+  return getEtagHeader(res);
 }
 
 const DiffSummarySchema = z.object({
@@ -251,15 +288,30 @@ async function apiAgentChat(
   projectId: string,
   message: string,
   mode: "suggest" | "apply",
-  screenshotUrl?: string
-): Promise<{ assistantMessage: string; applied: boolean; page: Page; proposedPage?: Page; diffSummary?: DiffSummary }> {
+  screenshotUrl?: string,
+  etag?: string | null
+): Promise<{
+  assistantMessage: string;
+  applied: boolean;
+  page: Page;
+  proposedPage?: Page;
+  diffSummary?: DiffSummary;
+  pageEtag: string | null;
+}> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (etag) headers["if-match"] = etag;
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/chat`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({ message, mode, screenshotUrl }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
+    const serverPageRaw = (json as { page?: unknown }).page;
+    if ((res.status === 409 || res.status === 412) && typeof serverPageRaw !== "undefined") {
+      const serverPage = PageSchema.parse(serverPageRaw);
+      throw new ApiConflictError("Page changed while the agent was running (conflict).", serverPage, getEtagHeader(res));
+    }
     const err = (json as { error?: string }).error ?? `Agent error (${res.status})`;
     throw new Error(err);
   }
@@ -272,28 +324,37 @@ async function apiAgentChat(
   const diffSummary = typeof diffSummaryRaw === "undefined" ? undefined : DiffSummarySchema.parse(diffSummaryRaw);
   const base = { assistantMessage, applied, page };
   const withProposal = proposedPage ? { ...base, proposedPage } : base;
-  return diffSummary ? { ...withProposal, diffSummary } : withProposal;
+  const withDiff = diffSummary ? { ...withProposal, diffSummary } : withProposal;
+  return { ...withDiff, pageEtag: getEtagHeader(res) };
 }
 
 async function apiApplyAgentProposal(
   projectId: string,
   message: string,
   basePage: Page,
-  proposedPage: Page
-): Promise<{ page: Page; diffSummary: DiffSummary }> {
+  proposedPage: Page,
+  etag?: string | null
+): Promise<{ page: Page; diffSummary: DiffSummary; pageEtag: string | null }> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (etag) headers["if-match"] = etag;
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/apply`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({ message, basePage, proposedPage }),
   });
   const json = (await res.json()) as unknown;
   if (!res.ok) {
+    const serverPageRaw = (json as { page?: unknown }).page;
+    if ((res.status === 409 || res.status === 412) && typeof serverPageRaw !== "undefined") {
+      const serverPage = PageSchema.parse(serverPageRaw);
+      throw new ApiConflictError("Page changed on disk (conflict).", serverPage, getEtagHeader(res));
+    }
     const err = (json as { error?: string }).error ?? `Agent apply error (${res.status})`;
     throw new Error(err);
   }
   const page = PageSchema.parse((json as { page?: unknown }).page);
   const diffSummary = DiffSummarySchema.parse((json as { diffSummary?: unknown }).diffSummary);
-  return { page, diffSummary };
+  return { page, diffSummary, pageEtag: getEtagHeader(res) };
 }
 
 async function apiUploadImage(projectId: string, file: File, alt?: string) {
@@ -310,21 +371,33 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   return AssetSchema.parse(asset);
 }
 
-async function apiReplaceImageAsset(projectId: string, assetId: string, file: File): Promise<{ asset: Asset; page: Page }> {
+async function apiReplaceImageAsset(
+  projectId: string,
+  assetId: string,
+  file: File,
+  etag?: string | null
+): Promise<{ asset: Asset; page: Page; pageEtag: string | null }> {
   const form = new FormData();
   form.append("file", file);
+  const headers: Record<string, string> = {};
+  if (etag) headers["if-match"] = etag;
   const res = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/assets/images/${encodeURIComponent(assetId)}/replace`,
-    { method: "POST", body: form }
+    { method: "POST", body: form, headers }
   );
   const json = (await res.json()) as unknown;
   if (!res.ok) {
+    const serverPageRaw = (json as { page?: unknown }).page;
+    if ((res.status === 409 || res.status === 412) && typeof serverPageRaw !== "undefined") {
+      const serverPage = PageSchema.parse(serverPageRaw);
+      throw new ApiConflictError("Page changed on disk (conflict).", serverPage, getEtagHeader(res));
+    }
     const err = (json as { error?: string }).error ?? `Asset replace error (${res.status})`;
     throw new Error(err);
   }
   const asset = AssetSchema.parse((json as { asset?: unknown }).asset);
   const page = PageSchema.parse((json as { page?: unknown }).page);
-  return { asset, page };
+  return { asset, page, pageEtag: getEtagHeader(res) };
 }
 
 async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
@@ -438,7 +511,9 @@ export function App() {
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{ serverPage: Page; serverEtag: string | null } | null>(null);
   const lastSavedJsonRef = useRef<string | null>(null);
+  const pageEtagRef = useRef<string | null>(null);
   const [lastSavedAtMs, setLastSavedAtMs] = useState<number | null>(null);
   const [autosaveEnabled, setAutosaveEnabled] = useState(true);
   const [isAutosaving, setIsAutosaving] = useState(false);
@@ -469,6 +544,7 @@ export function App() {
   const [agentProposalBasePage, setAgentProposalBasePage] = useState<Page | null>(null);
   const [agentProposalBaseJson, setAgentProposalBaseJson] = useState<string | null>(null);
   const [agentProposalMessage, setAgentProposalMessage] = useState<string | null>(null);
+  const [agentProposalBaseEtag, setAgentProposalBaseEtag] = useState<string | null>(null);
   const [agentDiffSummary, setAgentDiffSummary] = useState<DiffSummary | null>(null);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -524,10 +600,13 @@ export function App() {
     setState({ kind: "loading" });
     try {
       const next = await apiGetPage(effectiveProjectId);
-      setState({ kind: "ready", editor: { page: next, past: [], future: [] } });
-      lastSavedJsonRef.current = JSON.stringify(next);
+      pageEtagRef.current = next.etag;
+      setConflict(null);
+      setState({ kind: "ready", editor: { page: next.page, past: [], future: [] } });
+      lastSavedJsonRef.current = JSON.stringify(next.page);
       setLastSavedAtMs(Date.now());
       setAutosaveError(null);
+      setSaveError(null);
       setLoadedProjectId(effectiveProjectId);
       setSelected(null);
       setAgentReply(null);
@@ -536,6 +615,7 @@ export function App() {
       setAgentProposalBasePage(null);
       setAgentProposalBaseJson(null);
       setAgentProposalMessage(null);
+      setAgentProposalBaseEtag(null);
       setAgentDiffSummary(null);
       void refreshProjects();
     } catch (error) {
@@ -543,7 +623,7 @@ export function App() {
       setState({ kind: "error", message });
       toast.error("Failed to load project", message);
     }
-  }, [projectId, refreshProjects, toast]);
+  }, [pageEtagRef, projectId, refreshProjects, toast]);
 
   useEffect(() => {
     void load();
@@ -568,7 +648,16 @@ export function App() {
     async (pageToSave: Page) => {
       const json = JSON.stringify(pageToSave);
       const run = async () => {
-        await apiPutPage(projectId, pageToSave);
+        try {
+          const nextEtag = await apiPutPage(projectId, pageToSave, { etag: pageEtagRef.current });
+          pageEtagRef.current = nextEtag;
+          setConflict(null);
+        } catch (error) {
+          if (error instanceof ApiConflictError) {
+            setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+          }
+          throw error;
+        }
         lastSavedJsonRef.current = json;
         setLastSavedAtMs(Date.now());
         setAutosaveError(null);
@@ -597,13 +686,55 @@ export function App() {
       await persistPage(page);
       toast.success("Saved", `projects/${projectId}/page.json`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setSaveError(message);
-      toast.error("Save failed", message);
+      if (error instanceof ApiConflictError) {
+        setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+        setSaveError("Conflict: page changed on disk. Reload or overwrite.");
+        toast.error("Save conflict", "Page changed on disk. Reload or overwrite.");
+      } else {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setSaveError(message);
+        toast.error("Save failed", message);
+      }
     } finally {
       setIsSaving(false);
     }
   }, [flushAutosaveTimer, page, persistPage, projectId, toast]);
+
+  const reloadAfterConflict = useCallback(() => {
+    if (!conflict) return;
+    flushAutosaveTimer();
+    pageEtagRef.current = conflict.serverEtag;
+    setState({ kind: "ready", editor: { page: conflict.serverPage, past: [], future: [] } });
+    lastSavedJsonRef.current = JSON.stringify(conflict.serverPage);
+    setLastSavedAtMs(Date.now());
+    setAutosaveError(null);
+    setSaveError(null);
+    setSelected(null);
+    setConflict(null);
+    toast.success("Reloaded latest from disk");
+  }, [conflict, flushAutosaveTimer, toast]);
+
+  const overwriteAfterConflict = useCallback(async () => {
+    if (!page) return;
+    flushAutosaveTimer();
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const nextEtag = await apiPutPage(activeProjectId, page, { force: true });
+      pageEtagRef.current = nextEtag;
+      setConflict(null);
+      lastSavedJsonRef.current = JSON.stringify(page);
+      setLastSavedAtMs(Date.now());
+      setAutosaveError(null);
+      toast.success("Overwrote disk version", `projects/${activeProjectId}/page.json`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setSaveError(message);
+      toast.error("Overwrite failed", message);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [activeProjectId, flushAutosaveTimer, page, toast]);
 
   useEffect(() => {
     if (!autosaveEnabled) return;
@@ -626,6 +757,12 @@ export function App() {
 
       void persistPage(latest)
         .catch((error: unknown) => {
+          if (error instanceof ApiConflictError) {
+            setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+            setAutosaveError("Conflict: page changed on disk. Reload or overwrite.");
+            toast.error("Autosave conflict", "Page changed on disk. Reload or overwrite.");
+            return;
+          }
           const message = error instanceof Error ? error.message : "Unknown error";
           setAutosaveError(message);
           toast.error("Autosave failed", message);
@@ -839,12 +976,24 @@ export function App() {
       if (!page) return;
       flushAutosaveTimer();
       const toUpload = optimizeUploads ? await downscaleImageFile(file, maxUploadPx) : file;
-      const result = await apiReplaceImageAsset(activeProjectId, assetId, toUpload);
-      updatePage(() => result.page, { recordUndo: true });
-      lastSavedJsonRef.current = JSON.stringify(result.page);
-      setLastSavedAtMs(Date.now());
-      setAutosaveError(null);
-      toast.success("Asset replaced", result.asset.filename);
+      try {
+        const result = await apiReplaceImageAsset(activeProjectId, assetId, toUpload, pageEtagRef.current);
+        pageEtagRef.current = result.pageEtag;
+        setConflict(null);
+        updatePage(() => result.page, { recordUndo: true });
+        lastSavedJsonRef.current = JSON.stringify(result.page);
+        setLastSavedAtMs(Date.now());
+        setAutosaveError(null);
+        toast.success("Asset replaced", result.asset.filename);
+      } catch (error) {
+        if (error instanceof ApiConflictError) {
+          setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+          toast.error("Asset replace conflict", "Page changed on disk. Reload or overwrite.");
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error("Asset replace failed", message);
+      }
     },
     [activeProjectId, flushAutosaveTimer, maxUploadPx, optimizeUploads, page, toast, updatePage]
   );
@@ -951,6 +1100,7 @@ export function App() {
     setAgentProposalBasePage(null);
     setAgentProposalBaseJson(null);
     setAgentProposalMessage(null);
+    setAgentProposalBaseEtag(null);
     setAgentDiffSummary(null);
     try {
       await ensureSaved(page);
@@ -959,6 +1109,7 @@ export function App() {
       if (!baseJson) {
         throw new Error("Internal error: missing base page snapshot for agent run.");
       }
+      const baseEtag = pageEtagRef.current;
 
       let latestScreenshotUrl: string | undefined;
       try {
@@ -969,7 +1120,7 @@ export function App() {
         // Best-effort: continue without screenshot (server might not have Playwright installed).
       }
 
-      const result = await apiAgentChat(activeProjectId, trimmed, agentRunMode, latestScreenshotUrl);
+      const result = await apiAgentChat(activeProjectId, trimmed, agentRunMode, latestScreenshotUrl, baseEtag);
       setAgentReply(result.assistantMessage);
       setAgentDiffSummary(result.diffSummary ?? null);
       if (latestPageJsonRef.current !== baseJson) {
@@ -978,6 +1129,8 @@ export function App() {
         return;
       }
       if (result.applied) {
+        pageEtagRef.current = result.pageEtag;
+        setConflict(null);
         updatePage(() => result.page, { recordUndo: true });
         lastSavedJsonRef.current = JSON.stringify(result.page);
         setLastSavedAtMs(Date.now());
@@ -985,6 +1138,7 @@ export function App() {
         setSelected(null);
         toast.success("Agent applied changes");
       } else if (result.proposedPage) {
+        setAgentProposalBaseEtag(result.pageEtag);
         setAgentProposal(result.proposedPage);
         setAgentProposalBasePage(page);
         setAgentProposalBaseJson(baseJson);
@@ -994,9 +1148,15 @@ export function App() {
         toast.error("Agent returned no proposal");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setAgentError(message);
-      toast.error("Agent failed", message);
+      if (error instanceof ApiConflictError) {
+        setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+        setAgentError("Conflict: page changed on disk. Reload or overwrite.");
+        toast.error("Agent conflict", "Page changed on disk. Reload or overwrite.");
+      } else {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setAgentError(message);
+        toast.error("Agent failed", message);
+      }
     } finally {
       setIsAgentRunning(false);
     }
@@ -1016,7 +1176,15 @@ export function App() {
     setIsSaving(true);
     setSaveError(null);
     try {
-      const result = await apiApplyAgentProposal(activeProjectId, agentProposalMessage, agentProposalBasePage, agentProposal);
+      const result = await apiApplyAgentProposal(
+        activeProjectId,
+        agentProposalMessage,
+        agentProposalBasePage,
+        agentProposal,
+        agentProposalBaseEtag
+      );
+      pageEtagRef.current = result.pageEtag;
+      setConflict(null);
       updatePage(() => result.page, { recordUndo: true });
       lastSavedJsonRef.current = JSON.stringify(result.page);
       setLastSavedAtMs(Date.now());
@@ -1026,12 +1194,19 @@ export function App() {
       setAgentProposalBasePage(null);
       setAgentProposalBaseJson(null);
       setAgentProposalMessage(null);
+      setAgentProposalBaseEtag(null);
       setSelected(null);
       toast.success("Applied suggestion", `projects/${activeProjectId}/page.json`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      setSaveError(message);
-      toast.error("Apply failed", message);
+      if (error instanceof ApiConflictError) {
+        setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+        setSaveError("Conflict: page changed on disk. Reload or overwrite.");
+        toast.error("Apply conflict", "Page changed on disk. Reload or overwrite.");
+      } else {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setSaveError(message);
+        toast.error("Apply failed", message);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -1040,6 +1215,7 @@ export function App() {
     agentProposal,
     agentProposalBaseJson,
     agentProposalBasePage,
+    agentProposalBaseEtag,
     agentProposalMessage,
     isSaving,
     toast,
@@ -1273,6 +1449,20 @@ export function App() {
                             Reload
                           </button>
                         </div>
+                        {conflict ? (
+                          <div className="errorBox" style={{ marginTop: 10 }}>
+                            <div className="errorBoxTitle">Conflict</div>
+                            <div>Page changed on disk (another tab/process saved a newer version).</div>
+                            <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 10 }}>
+                              <button className="btn" onClick={() => reloadAfterConflict()} disabled={isSaving}>
+                                Reload latest
+                              </button>
+                              <button className="btn btnPrimary" onClick={() => void overwriteAfterConflict()} disabled={!page || isSaving}>
+                                Overwrite with my version
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {saveError ? (
                           <div className="errorBox" style={{ marginTop: 10 }}>
                             <div className="errorBoxTitle">Save error</div>

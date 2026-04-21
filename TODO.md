@@ -10,7 +10,7 @@ It is organized by milestones and designed to be executed incrementally with con
 - [x] Add a consistent error UI pattern (toast + inline error details).
 - [x] Add `undo/redo` foundations (snapshot history; transactions TBD) for all page edits.
 - [x] Add autosave (debounced) + explicit “Save now”.
-- [ ] Add conflict handling (future).
+- [x] Add conflict handling (ETag + reload/overwrite UI).
 
 ## Milestone 1 — Editor Model (schema + rendering)
 

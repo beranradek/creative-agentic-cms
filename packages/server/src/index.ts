@@ -22,7 +22,7 @@ const dataDirAbs = path.resolve(projectRoot, config.DATA_DIR);
 const store = new ProjectStore(dataDirAbs);
 const app = express();
 
-app.use(cors());
+app.use(cors({ exposedHeaders: ["ETag"] }));
 app.use(express.json({ limit: "5mb" }));
 
 const ProjectIdSchema = z
@@ -45,7 +45,8 @@ app.post("/api/projects", async (req, res) => {
 app.get("/api/projects/:projectId/page", async (req, res) => {
   const projectId = ProjectIdSchema.parse(req.params.projectId);
   try {
-    const page = await store.readPage(projectId);
+    const { page, etag } = await store.readPageWithEtag(projectId);
+    res.setHeader("ETag", etag);
     res.json({ page });
   } catch (error) {
     const isMissing =
@@ -56,7 +57,8 @@ app.get("/api/projects/:projectId/page", async (req, res) => {
     if (isMissing) {
       await store.ensureProject(projectId);
       const page = createDefaultPage();
-      await store.writePage(projectId, page);
+      const etag = await store.writePageWithEtag(projectId, page);
+      res.setHeader("ETag", etag);
       res.json({ page });
       return;
     }
@@ -66,8 +68,29 @@ app.get("/api/projects/:projectId/page", async (req, res) => {
 
 app.put("/api/projects/:projectId/page", async (req, res) => {
   const projectId = ProjectIdSchema.parse(req.params.projectId);
+  const force = z
+    .enum(["1", "true"])
+    .optional()
+    .transform((v) => v === "1" || v === "true")
+    .parse(req.query.force);
   const parsed = PageSchema.parse(req.body);
-  await store.writePage(projectId, parsed);
+
+  const expectedEtag = z.string().min(1).optional().parse(req.header("if-match"));
+
+  if (!force && expectedEtag) {
+    const result = await store.writePageIfMatch(projectId, parsed, expectedEtag);
+    if (!result.ok) {
+      if (result.etag) res.setHeader("ETag", result.etag);
+      res.status(409).json({ error: "conflict", page: result.page });
+      return;
+    }
+    res.setHeader("ETag", result.etag);
+    res.json({ ok: true });
+    return;
+  }
+
+  const etag = await store.writePageWithEtag(projectId, parsed);
+  res.setHeader("ETag", etag);
   res.json({ ok: true });
 });
 

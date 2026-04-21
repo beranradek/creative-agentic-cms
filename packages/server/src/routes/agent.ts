@@ -39,11 +39,22 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
       })
       .parse(req.body);
 
-    let currentPage;
+    let currentPageWithEtag;
     try {
-      currentPage = await store.readPage(projectId);
+      currentPageWithEtag = await store.readPageWithEtag(projectId);
     } catch {
-      currentPage = createDefaultPage();
+      const page = createDefaultPage();
+      const etag = await store.writePageWithEtag(projectId, page);
+      currentPageWithEtag = { page, etag };
+    }
+    const currentPage = currentPageWithEtag.page;
+    const currentEtag = currentPageWithEtag.etag;
+    res.setHeader("ETag", currentEtag);
+
+    const expectedEtag = z.string().min(1).optional().parse(req.header("if-match"));
+    if (expectedEtag && expectedEtag !== currentEtag) {
+      res.status(409).json({ error: "conflict", page: currentPage });
+      return;
     }
 
     if (JSON.stringify(currentPage) !== JSON.stringify(body.basePage)) {
@@ -67,7 +78,13 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
 
     try {
       const { summary } = validateAgentEdit(body.basePage, body.proposedPage, body.message, { budget });
-      await store.writePage(projectId, body.proposedPage);
+      const writeResult = await store.writePageIfMatch(projectId, body.proposedPage, currentEtag);
+      if (!writeResult.ok) {
+        if (writeResult.etag) res.setHeader("ETag", writeResult.etag);
+        res.status(409).json({ error: "conflict", page: writeResult.page });
+        return;
+      }
+      res.setHeader("ETag", writeResult.etag);
       res.json({ ok: true, applied: true, page: body.proposedPage, diffSummary: summary });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Agent edit rejected by guardrails.";
@@ -85,12 +102,17 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
       })
       .parse(req.body);
 
-    let page;
+    let pageWithEtag;
     try {
-      page = await store.readPage(projectId);
+      pageWithEtag = await store.readPageWithEtag(projectId);
     } catch {
-      page = createDefaultPage();
+      const page = createDefaultPage();
+      const etag = await store.writePageWithEtag(projectId, page);
+      pageWithEtag = { page, etag };
     }
+    const page = pageWithEtag.page;
+    const baseEtag = pageWithEtag.etag;
+    res.setHeader("ETag", baseEtag);
 
     try {
       let screenshotPngBase64: string | undefined;
@@ -142,7 +164,13 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
 
         try {
           const { summary } = validateAgentEdit(page, nextPage, body.message, { budget });
-          await store.writePage(projectId, nextPage);
+          const writeResult = await store.writePageIfMatch(projectId, nextPage, baseEtag);
+          if (!writeResult.ok) {
+            if (writeResult.etag) res.setHeader("ETag", writeResult.etag);
+            res.status(409).json({ error: "conflict", page: writeResult.page });
+            return;
+          }
+          res.setHeader("ETag", writeResult.etag);
           res.json({ assistantMessage: output.assistantMessage, applied: true, page: nextPage, diffSummary: summary });
           return;
         } catch (error) {

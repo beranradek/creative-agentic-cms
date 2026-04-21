@@ -77,6 +77,7 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
   router.post("/images/:assetId/replace", upload.single("file"), async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
     const assetId = z.string().min(1).parse((req.params as { assetId?: string }).assetId);
+    const clientEtag = z.string().min(1).optional().parse(req.header("if-match"));
 
     const file = req.file;
     if (!file) {
@@ -95,11 +96,19 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
     const assetsDir = store.getAssetsDir(projectId);
     await mkdir(assetsDir, { recursive: true });
 
-    let page;
+    let pageWithEtag;
     try {
-      page = await store.readPage(projectId);
+      pageWithEtag = await store.readPageWithEtag(projectId);
     } catch {
       res.status(404).json({ error: "Project page not found" });
+      return;
+    }
+    const page = pageWithEtag.page;
+    const expectedEtag = pageWithEtag.etag;
+
+    if (clientEtag && clientEtag !== expectedEtag) {
+      res.setHeader("ETag", expectedEtag);
+      res.status(409).json({ error: "conflict", page });
       return;
     }
 
@@ -112,6 +121,34 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
     const filename = `${assetId}${ext}`;
     const targetPath = path.join(assetsDir, filename);
     await writeFile(targetPath, file.buffer);
+
+    const dimensions = imageSize(file.buffer);
+    const updatedAsset = ImageAssetSchema.parse({
+      ...existingAsset,
+      filename,
+      mimeType,
+      width: dimensions.width ?? null,
+      height: dimensions.height ?? null,
+    });
+
+    const nextPage = {
+      ...page,
+      assets: page.assets.map((a) => (a.type === "image" && a.id === assetId ? updatedAsset : a)),
+    };
+    const writeResult = await store.writePageIfMatch(projectId, nextPage, expectedEtag);
+    if (!writeResult.ok) {
+      if (filename !== existingAsset.filename) {
+        try {
+          await unlink(targetPath);
+        } catch {
+          // ignore rollback failures
+        }
+      }
+      if (writeResult.etag) res.setHeader("ETag", writeResult.etag);
+      res.status(409).json({ error: "conflict", page: writeResult.page });
+      return;
+    }
+    res.setHeader("ETag", writeResult.etag);
 
     try {
       const files = await readdir(assetsDir);
@@ -129,21 +166,6 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
     } catch {
       // ignore cleanup failures
     }
-
-    const dimensions = imageSize(file.buffer);
-    const updatedAsset = ImageAssetSchema.parse({
-      ...existingAsset,
-      filename,
-      mimeType,
-      width: dimensions.width ?? null,
-      height: dimensions.height ?? null,
-    });
-
-    const nextPage = {
-      ...page,
-      assets: page.assets.map((a) => (a.type === "image" && a.id === assetId ? updatedAsset : a)),
-    };
-    await store.writePage(projectId, nextPage);
 
     res.json({ ok: true, asset: updatedAsset, page: nextPage });
   });
