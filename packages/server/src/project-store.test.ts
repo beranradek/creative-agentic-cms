@@ -49,5 +49,37 @@ describe("ProjectStore ETag + conflict handling", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
-});
 
+  it("serializes concurrent If-Match writes (one wins, one conflicts)", async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cac-store-"));
+    try {
+      const store = new ProjectStore(tmpDir);
+      const projectId = "p3";
+
+      const initial = createDefaultPage();
+      const etag1 = await store.writePageWithEtag(projectId, initial);
+
+      const updatedA = PageSchema.parse({
+        ...initial,
+        metadata: { ...initial.metadata, title: "A" },
+      });
+      const updatedB = PageSchema.parse({
+        ...initial,
+        metadata: { ...initial.metadata, title: "B" },
+      });
+
+      const [r1, r2] = await Promise.all([
+        store.writePageIfMatch(projectId, updatedA, etag1),
+        store.writePageIfMatch(projectId, updatedB, etag1),
+      ]);
+
+      const okCount = [r1, r2].filter((r) => r.ok).length;
+      expect(okCount).toBe(1);
+
+      const final = await store.readPage(projectId);
+      expect(["A", "B"]).toContain(final.metadata.title);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
