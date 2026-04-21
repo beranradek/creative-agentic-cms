@@ -89,6 +89,11 @@ function buildPageSnapshot(page: Page): string {
     if (section.style.background) styleParts.push(`bg=${section.style.background}`);
     if (section.style.padding !== null) styleParts.push(`pad=${section.style.padding}px`);
     if (section.style.maxWidth !== null) styleParts.push(`maxW=${section.style.maxWidth}px`);
+    if (!section.settings.visible) styleParts.push("hidden");
+    if (section.settings.layout !== "stack") styleParts.push(`layout=${section.settings.layout}`);
+    if (section.settings.gap !== null) styleParts.push(`gap=${section.settings.gap}px`);
+    if (section.settings.layout === "grid" && section.settings.gridColumns !== null)
+      styleParts.push(`cols=${section.settings.gridColumns}`);
     const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
     lines.push(`- [${safeLabel(section.label)}] (${section.id})${styleText}`);
     for (const c of section.components) {

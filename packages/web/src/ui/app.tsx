@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   AssetSchema,
   PageSchema,
+  SECTION_GRID_COLUMNS,
+  SECTION_LAYOUTS,
   SECTION_MAX_WIDTHS,
   type Asset,
   type Component,
@@ -42,7 +44,13 @@ function createId(prefix: string): string {
 }
 
 function createSection(label: string): Section {
-  return { id: createId("sec"), label, style: { background: null, padding: null, maxWidth: null }, components: [] };
+  return {
+    id: createId("sec"),
+    label,
+    style: { background: null, padding: null, maxWidth: null },
+    settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+    components: [],
+  };
 }
 
 function createComponent(type: Component["type"]): Component {
@@ -1648,7 +1656,9 @@ export function App() {
             <div className="preview">
               {page ? (
                 <div className="stack" style={{ gap: 18 }}>
-                  {page.sections.map((section) => (
+                  {page.sections
+                    .filter((section) => section.settings.visible)
+                    .map((section) => (
                   <div
                     key={section.id}
                     className="previewSection"
@@ -1660,7 +1670,19 @@ export function App() {
                       maxWidth: section.style.maxWidth ?? 980,
                     }}
                   >
-                    <div className="stack" style={{ gap: 12 }}>
+                    <div
+                      data-testid="preview-section-inner"
+                      style={{
+                        gap: section.settings.gap ?? 12,
+                        display: section.settings.layout === "grid" ? "grid" : "flex",
+                        gridTemplateColumns:
+                          section.settings.layout === "grid"
+                            ? `repeat(${section.settings.gridColumns ?? 2}, minmax(0, 1fr))`
+                            : undefined,
+                        alignItems: section.settings.layout === "grid" ? "start" : undefined,
+                        flexDirection: section.settings.layout === "grid" ? undefined : "column",
+                      }}
+                    >
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
@@ -1711,22 +1733,23 @@ export function App() {
                           onMoveHere={(fromSectionId, fromComponentId) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
-                              const fromSection = prev.sections.find((s) => s.id === fromSectionId);
+                              const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
+                              const actualFromSectionId = fromSection.id;
 
                               const moving = fromSection.components.find((c) => c.id === fromComponentId);
                               if (!moving) return prev;
 
                               const nextSections = prev.sections.map((s) => {
-                                if (s.id === fromSectionId && s.id === section.id) {
+                                if (s.id === actualFromSectionId && s.id === section.id) {
                                   const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
                                   const toIndex = s.components.findIndex((c) => c.id === component.id);
                                   if (fromIndex < 0 || toIndex < 0) return s;
                                   return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
                                 }
 
-                                if (s.id === fromSectionId) {
+                                if (s.id === actualFromSectionId) {
                                   return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
                                 }
 
@@ -1756,20 +1779,21 @@ export function App() {
                           onMoveToEnd={(fromSectionId, fromComponentId) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
-                              const fromSection = prev.sections.find((s) => s.id === fromSectionId);
+                              const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
-                            const moving = fromSection.components.find((c) => c.id === fromComponentId);
-                            if (!moving) return prev;
+                              const actualFromSectionId = fromSection.id;
+                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
+                              if (!moving) return prev;
 
                             const nextSections = prev.sections.map((s) => {
-                              if (s.id === fromSectionId && s.id === section.id) {
+                              if (s.id === actualFromSectionId && s.id === section.id) {
                                 const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
                                 const toIndex = s.components.length - 1;
                                 if (fromIndex < 0) return s;
                                 return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
                               }
-                              if (s.id === fromSectionId) {
+                              if (s.id === actualFromSectionId) {
                                 return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
                               }
                               if (s.id === section.id) {
@@ -1784,10 +1808,10 @@ export function App() {
                           setSelected((prevSel) =>
                             prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
                           );
-                        }}
-                      />
+                          }}
+                        />
                       </div>
-                    </div>
+                  </div>
                   ))}
                 </div>
               ) : (
@@ -1879,7 +1903,10 @@ export function App() {
                     }
                   >
                     <div className="row" style={{ justifyContent: "space-between" }}>
-                      <div className="cardTitle">{section.label}</div>
+                      <div className="row" style={{ gap: 10 }}>
+                        <div className="cardTitle">{section.label}</div>
+                        {!section.settings.visible ? <span className="badge">hidden</span> : null}
+                      </div>
                       <div className="row">
                         <button className="btn" onClick={() => moveSection(section.id, -1)} disabled={!canEdit || idx === 0}>
                           ↑
@@ -2015,28 +2042,38 @@ function PreviewComponent(props: {
   } = props;
   const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
 
+  const onDragOverTarget = (e: React.DragEvent) => {
+    if (!canEdit) return;
+    const payload = getDragPayload(e);
+    if (!payload || payload.kind !== "component") return;
+    e.preventDefault();
+  };
+
+  const onDropTarget = (e: React.DragEvent) => {
+    if (!canEdit) return;
+    const payload = getDragPayload(e);
+    if (!payload || payload.kind !== "component") return;
+    e.preventDefault();
+    clearDragPayload();
+    if (payload.sectionId === sectionId && payload.componentId === component.id) return;
+    onMoveHere(payload.sectionId, payload.componentId);
+  };
+
   const dragProps = {
     draggable: canEdit && !isSelected,
     onDragStart: (e: React.DragEvent) => {
       if (!canEdit) return;
       setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
     },
-    onDragEnd: () => clearDragPayload(),
-    onDragOver: (e: React.DragEvent) => {
-      if (!canEdit) return;
-      const payload = getDragPayload(e);
-      if (!payload || payload.kind !== "component") return;
-      e.preventDefault();
+    onDragEnd: () => {
+      // In some browsers/automation harnesses, `drop` can race with `dragend`.
+      // Defer clearing so drop handlers can still read the in-memory payload if needed.
+      setTimeout(() => clearDragPayload(), 0);
     },
-    onDrop: (e: React.DragEvent) => {
-      if (!canEdit) return;
-      const payload = getDragPayload(e);
-      if (!payload || payload.kind !== "component") return;
-      e.preventDefault();
-      clearDragPayload();
-      if (payload.sectionId === sectionId && payload.componentId === component.id) return;
-      onMoveHere(payload.sectionId, payload.componentId);
-    },
+    onDragOver: onDragOverTarget,
+    onDragOverCapture: onDragOverTarget,
+    onDrop: onDropTarget,
+    onDropCapture: onDropTarget,
   };
   if (component.type === "hero") {
     const bgAsset =
@@ -2062,10 +2099,7 @@ function PreviewComponent(props: {
         data-component-id={component.id}
         data-component-type={component.type}
         {...dragProps}
-        onClick={(e) => {
-          e.preventDefault();
-          onSelect();
-        }}
+        onClick={() => onSelect()}
       >
         {isSelected ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
@@ -2077,7 +2111,7 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="hero" style={heroStyle}>
+        <div className="hero" style={{ ...heroStyle, pointerEvents: isSelected ? "auto" : "none" }}>
           <h1
             contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
@@ -2170,7 +2204,12 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        <div key={`${component.id}-view`} className="richText" dangerouslySetInnerHTML={{ __html: component.html }} />
+        <div
+          key={`${component.id}-view`}
+          className="richText"
+          style={{ pointerEvents: "none" }}
+          dangerouslySetInnerHTML={{ __html: component.html }}
+        />
       </div>
     );
   }
@@ -2195,7 +2234,7 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="contactForm" id="contact">
+        <div className="contactForm" id="contact" style={{ pointerEvents: isSelected ? "auto" : "none" }}>
           <h3
             contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
@@ -2294,7 +2333,7 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="imageBlock" style={blockStyle}>
+        <div className="imageBlock" style={{ ...blockStyle, pointerEvents: isSelected ? "auto" : "none" }}>
           <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} style={imgStyle} />
           {isSelected && canEdit ? (
             <div
@@ -2518,6 +2557,118 @@ function Inspector(props: {
                   ))}
                 </select>
                 <button className="btn" onClick={() => onUpdate({ ...section, style: { ...section.style, maxWidth: null } })} disabled={!canEdit}>
+                  Auto
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="cardTitle">Section settings</div>
+          <div className="stack">
+            <label className="row" style={{ justifyContent: "space-between" }}>
+              <span className="muted">Visible</span>
+              <input
+                data-testid="section-visible"
+                type="checkbox"
+                checked={section.settings.visible}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...section,
+                    settings: { ...section.settings, visible: e.target.checked },
+                  })
+                }
+              />
+            </label>
+
+            <div className="field">
+              <label>Layout</label>
+              <select
+                data-testid="section-layout"
+                value={section.settings.layout}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...section,
+                    settings: {
+                      ...section.settings,
+                      layout: SECTION_LAYOUTS.includes(e.target.value as (typeof SECTION_LAYOUTS)[number])
+                        ? (e.target.value as (typeof SECTION_LAYOUTS)[number])
+                        : "stack",
+                    },
+                  })
+                }
+              >
+                {SECTION_LAYOUTS.map((layout) => (
+                  <option key={layout} value={layout}>
+                    {layout}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Gap</label>
+              <div className="row">
+                <input
+                  data-testid="section-gap"
+                  type="range"
+                  min={0}
+                  max={48}
+                  value={section.settings.gap ?? 12}
+                  disabled={!canEdit}
+                  onChange={(e) =>
+                    onUpdate({
+                      ...section,
+                      settings: { ...section.settings, gap: Number(e.target.value) },
+                    })
+                  }
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{section.settings.gap ?? 12}px</span>
+                <button className="btn" onClick={() => onUpdate({ ...section, settings: { ...section.settings, gap: null } })} disabled={!canEdit}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Grid columns</label>
+              <div className="row">
+                <select
+                  data-testid="section-grid-cols"
+                  value={section.settings.gridColumns ?? ""}
+                  disabled={!canEdit || section.settings.layout !== "grid"}
+                  onChange={(e) =>
+                    onUpdate({
+                      ...section,
+                      settings: {
+                        ...section.settings,
+                        gridColumns: (() => {
+                          if (e.target.value === "") return null;
+                          const n = Number(e.target.value);
+                          return SECTION_GRID_COLUMNS.includes(n as (typeof SECTION_GRID_COLUMNS)[number])
+                            ? (n as (typeof SECTION_GRID_COLUMNS)[number])
+                            : null;
+                        })(),
+                      },
+                    })
+                  }
+                >
+                  <option value="">(auto)</option>
+                  {SECTION_GRID_COLUMNS.map((n) => (
+                    <option key={n} value={String(n)}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn"
+                  onClick={() => onUpdate({ ...section, settings: { ...section.settings, gridColumns: null } })}
+                  disabled={!canEdit || section.settings.layout !== "grid"}
+                >
                   Auto
                 </button>
               </div>

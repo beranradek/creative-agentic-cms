@@ -86,6 +86,8 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
 }
 
 function renderSection(section: Section, assetsById: Map<string, Asset>): string {
+  if (!section.settings.visible) return "";
+
   const styles: string[] = [];
   if (section.style.background) styles.push(`background:${escapeHtml(section.style.background)};`);
   if (section.style.padding !== null) styles.push(`padding:${section.style.padding}px;`);
@@ -94,9 +96,26 @@ function renderSection(section: Section, assetsById: Map<string, Asset>): string
 
   const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
 
+  const gap = section.settings.gap ?? 12;
+  const layout = section.settings.layout;
+  const gridColumns = section.settings.gridColumns ?? 2;
+
+  const innerStyles: string[] = [];
+  innerStyles.push(`gap:${gap}px;`);
+  if (layout === "grid") {
+    innerStyles.push("display:grid;");
+    innerStyles.push(`grid-template-columns:repeat(${gridColumns},minmax(0,1fr));`);
+    innerStyles.push("align-items:start;");
+  } else {
+    innerStyles.push("display:flex;flex-direction:column;");
+  }
+  const innerStyleAttr = innerStyles.length ? ` style="${innerStyles.join("")}"` : "";
+
   const inner = section.components.map((c) => renderComponent(c, assetsById)).join("\n");
   return `<section class="section"${styleAttr}>
+<div class="sectionInner"${innerStyleAttr}>
 ${inner}
+</div>
 </section>`;
 }
 
@@ -107,6 +126,7 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1200px 600px at 15% 10%, rgba(37,99,235,0.10), transparent 58%), radial-gradient(900px 500px at 70% 20%, rgba(6,182,212,0.08), transparent 58%), var(--bg); color: var(--text); }
     .container { max-width: none; margin: 0 auto; padding: 32px 16px; display:flex; flex-direction:column; gap: 18px; }
     .section { width: 100%; max-width: 980px; margin: 0 auto; display:flex; flex-direction:column; gap: 12px; background: rgba(255,255,255,0.96); border: 1px solid rgba(15,23,42,0.08); border-radius: 18px; padding: 18px; box-shadow: 0 10px 26px rgba(15,23,42,0.06); }
+    .sectionInner { display:flex; flex-direction:column; gap: 12px; }
     .hero { border-radius: 18px; padding: 32px; border: 1px solid rgba(15,23,42,0.08); background: radial-gradient(900px 380px at 15% 15%, rgba(37,99,235,0.10), transparent 62%), radial-gradient(900px 380px at 70% 20%, rgba(6,182,212,0.08), transparent 62%), rgba(255,255,255,0.96); }
     .hero h1 { margin:0; font-size: 44px; line-height: 1.05; letter-spacing:-0.02em; }
     .hero p { margin: 12px 0 0 0; color: rgba(51,65,85,0.92); max-width: 60ch; line-height: 1.45; }

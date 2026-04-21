@@ -70,6 +70,21 @@ export const ComponentSchema = z.discriminatedUnion("type", [
 export const SECTION_MAX_WIDTHS = [720, 980, 1200] as const;
 const SectionMaxWidthSchema = z.union([z.literal(720), z.literal(980), z.literal(1200)]).nullable().default(null);
 
+export const SECTION_LAYOUTS = ["stack", "grid"] as const;
+const SectionLayoutSchema = z.union([z.literal("stack"), z.literal("grid")]).default("stack");
+
+export const SECTION_GRID_COLUMNS = [2, 3] as const;
+const SectionGridColumnsSchema = z.union([z.literal(2), z.literal(3)]).nullable().default(null);
+
+export const SectionSettingsSchema = z
+  .object({
+    visible: z.boolean().default(true),
+    layout: SectionLayoutSchema,
+    gap: z.number().int().min(0).max(48).nullable().default(null),
+    gridColumns: SectionGridColumnsSchema,
+  })
+  .default({});
+
 export const SectionSchema = z.object({
   id: SectionIdSchema,
   label: z.string().default("Section"),
@@ -84,6 +99,7 @@ export const SectionSchema = z.object({
       maxWidth: SectionMaxWidthSchema,
     })
     .default({}),
+  settings: SectionSettingsSchema,
   components: z.array(ComponentSchema).default([]),
 });
 

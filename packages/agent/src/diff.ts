@@ -33,7 +33,7 @@ function jsonStableLength(value: unknown): number {
 }
 
 function serializeComparableSection(section: Section): unknown {
-  return { label: section.label, style: section.style };
+  return { label: section.label, style: section.style, settings: section.settings };
 }
 
 function serializeComparableAsset(asset: Asset): unknown {

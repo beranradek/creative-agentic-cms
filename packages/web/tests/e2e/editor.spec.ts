@@ -180,38 +180,43 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await expect(cards.nth(1)).toContainText("2 components");
 });
 
-test("components can be reordered via drag and drop in Preview (within a section)", async ({ page }) => {
+test("components can be reordered via drag and drop within a section (Inspector list)", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_preview_reorder_${Date.now()}`;
   await loadProject(page, projectId);
 
   await ensurePaletteTab(page, "add");
-  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
 
   const sectionCard = page.getByTestId("structure-section-card").first();
   await sectionCard.getByRole("button", { name: "Select" }).click();
-  await page.getByRole("button", { name: "+ Text" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
 
-  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
   const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
-  await expect(hero).toHaveCount(1);
+  const form = page.locator('[data-testid="preview-item"][data-component-type="contact_form"]');
   await expect(text).toHaveCount(1);
+  await expect(form).toHaveCount(1);
 
-  await text.dragTo(hero);
+  await text.scrollIntoViewIfNeeded();
+  await form.scrollIntoViewIfNeeded();
 
-  const types = await page.getByTestId("preview-item").evaluateAll((els) =>
-    els.map((el) => el.getAttribute("data-component-type"))
-  );
-  expect(types[0]).toBe("rich_text");
+  const rows = page.getByTestId("inspector-component-row");
+  await expect(rows).toHaveCount(2);
+  const handles = page.getByTestId("inspector-component-drag-handle");
+  await expect(handles).toHaveCount(2);
+  await handles.nth(1).dragTo(rows.nth(0));
+
+  await expect
+    .poll(async () => await page.getByTestId("preview-item").first().getAttribute("data-component-type"))
+    .toBe("contact_form");
 
   await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
-  const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
-    els.map((el) => el.getAttribute("data-component-type"))
-  );
-  expect(typesAfter[0]).toBe("rich_text");
+  await expect
+    .poll(async () => await page.getByTestId("preview-item").first().getAttribute("data-component-type"))
+    .toBe("contact_form");
 });
 
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
@@ -271,6 +276,39 @@ test("section style (background + padding) persists", async ({ page }) => {
   expect(bgAfter).toBe("rgb(255, 0, 0)");
   const padAfter = await section.evaluate((el) => getComputedStyle(el).paddingTop);
   expect(padAfter).toBe("24px");
+});
+
+test("section visibility hides in Preview and export", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_visible_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByTestId("section-visible").uncheck();
+
+  await expect(page.locator("text=Design. Compose. Publish.")).toHaveCount(0);
+  await expect(page.getByTestId("preview-section")).toHaveCount(1);
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await expect(page.locator("text=Design. Compose. Publish.")).toHaveCount(0);
+  await expect(page.getByTestId("preview-section")).toHaveCount(1);
+
+  await page.getByTestId("export-site").click();
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).not.toContain("Design. Compose. Publish.");
+  expect(html).toContain("Write something compelling.");
 });
 
 test("can duplicate and delete a component from Preview toolbar", async ({ page }) => {
