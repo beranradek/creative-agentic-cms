@@ -37,7 +37,11 @@ Rules:
   - cmp_<uuid> for components
   - img_<uuid> for image assets
 - Keep rich_text.html valid, minimal HTML (p, ul, ol, li, strong, em, a).
-- You may freely add, remove, reorder, or restructure sections, components, and assets to best satisfy the user's request.
+- Make small, user-requested changes only. Avoid "creative rewrites" unless explicitly asked.
+- Do NOT delete sections/components/assets unless the user explicitly asks for deletion/removal.
+- Do NOT reorder or move content between sections unless the user explicitly asks for it.
+- Respect the diff budget (keep edits limited; prefer editing existing content over adding new structures).
+- assistantMessage should be a short, user-facing summary of what changed and what to do next.
 `;
 }
 
