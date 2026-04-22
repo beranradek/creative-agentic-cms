@@ -58,7 +58,7 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
     }
 
     if (JSON.stringify(currentPage) !== JSON.stringify(body.basePage)) {
-      res.status(409).json({ error: "Page changed since suggestion. Reload and rerun the agent." });
+      res.status(409).json({ error: "conflict", page: currentPage });
       return;
     }
 

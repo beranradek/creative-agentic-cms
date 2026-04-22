@@ -38,7 +38,8 @@ app.get("/api/projects", async (_req, res) => {
 app.post("/api/projects", async (req, res) => {
   const body = z.object({ projectId: ProjectIdSchema }).parse(req.body);
   await store.ensureProject(body.projectId);
-  await store.writePage(body.projectId, createDefaultPage());
+  const etag = await store.writePageWithEtag(body.projectId, createDefaultPage());
+  res.setHeader("ETag", etag);
   res.json({ ok: true });
 });
 
