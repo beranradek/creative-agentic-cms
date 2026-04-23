@@ -112,10 +112,24 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
   if (component.type === "hero") {
     const bg = component.backgroundImageAssetId ? assetsById.get(component.backgroundImageAssetId) : null;
     const bgText = bg && bg.type === "image" ? ` bg=${bg.filename}` : "";
-    return `hero: "${truncate(component.headline, 80)}" / "${truncate(component.subheadline, 120)}"${bgText}`;
+    const styleParts: string[] = [];
+    if (component.style.blockAlign) styleParts.push(`blockAlign=${component.style.blockAlign}`);
+    if (component.style.textAlign) styleParts.push(`textAlign=${component.style.textAlign}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.padding !== null) styleParts.push(`pad=${component.style.padding}px`);
+    if (component.style.backgroundColor) styleParts.push(`bg=${component.style.backgroundColor}`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `hero: "${truncate(component.headline, 80)}" / "${truncate(component.subheadline, 120)}"${bgText}${styleText}`;
   }
   if (component.type === "rich_text") {
-    return `rich_text: "${truncate(stripHtmlToText(component.html), 180)}"`;
+    const styleParts: string[] = [];
+    if (component.style.blockAlign) styleParts.push(`blockAlign=${component.style.blockAlign}`);
+    if (component.style.textAlign) styleParts.push(`textAlign=${component.style.textAlign}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.padding !== null) styleParts.push(`pad=${component.style.padding}px`);
+    if (component.style.backgroundColor) styleParts.push(`bg=${component.style.backgroundColor}`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `rich_text: "${truncate(stripHtmlToText(component.html), 180)}"${styleText}`;
   }
   if (component.type === "image") {
     const asset = assetsById.get(component.assetId);
@@ -129,7 +143,14 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
     return `image: asset=${component.assetId} file=${file}${styleText} caption="${truncate(component.caption, 80)}"`;
   }
   if (component.type === "contact_form") {
-    return `contact_form: "${truncate(component.headline, 80)}" submit="${truncate(component.submitLabel, 40)}"`;
+    const styleParts: string[] = [];
+    if (component.style.blockAlign) styleParts.push(`blockAlign=${component.style.blockAlign}`);
+    if (component.style.textAlign) styleParts.push(`textAlign=${component.style.textAlign}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.padding !== null) styleParts.push(`pad=${component.style.padding}px`);
+    if (component.style.backgroundColor) styleParts.push(`bg=${component.style.backgroundColor}`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `contact_form: "${truncate(component.headline, 80)}" submit="${truncate(component.submitLabel, 40)}"${styleText}`;
   }
   return assertNever(component);
 }
