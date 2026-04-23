@@ -52,8 +52,8 @@ type ComponentBoxStyle = {
 function computeBoxOuterStyle(style: ComponentBoxStyle): React.CSSProperties {
   const out: React.CSSProperties = {};
   if (style.maxWidth !== null) out.maxWidth = style.maxWidth;
-  const align = style.blockAlign ?? null;
-  if (style.maxWidth !== null && align) {
+  if (style.maxWidth !== null) {
+    const align = style.blockAlign ?? "center";
     out.margin = align === "center" ? "0 auto" : align === "left" ? "0 auto 0 0" : "0 0 0 auto";
   }
   return out;
@@ -2402,6 +2402,7 @@ function PreviewComponent(props: {
   if (component.type === "rich_text") {
     const outerStyle = computeBoxOuterStyle(component.style);
     const innerStyle = computeBoxInnerStyle(component.style);
+    const safeHtml = sanitizeRichTextHtml(component.html);
     if (isSelected && canEdit) {
       return (
         <div
@@ -2434,7 +2435,7 @@ function PreviewComponent(props: {
               e.currentTarget.innerHTML = clean;
               onUpdate({ ...component, html: clean });
             }}
-            dangerouslySetInnerHTML={{ __html: component.html }}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
         </div>
       );
@@ -2454,7 +2455,7 @@ function PreviewComponent(props: {
           key={`${component.id}-view`}
           className="richText"
           style={{ ...innerStyle, pointerEvents: "none" }}
-          dangerouslySetInnerHTML={{ __html: component.html }}
+          dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
       </div>
     );

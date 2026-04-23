@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PageSchema, type Page } from "@cac/shared";
+import { sanitizeRichTextHtml } from "./sanitize/rich-text.js";
 
 export type PageWithEtag = { page: Page; etag: string };
 export type WriteIfMatchResult =
@@ -57,27 +58,48 @@ export class ProjectStore {
     const pagePath = this.getPagePath(projectId);
     const raw = await readFile(pagePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
-    return PageSchema.parse(parsed);
+    const page = PageSchema.parse(parsed);
+    return this.sanitizePage(page);
   }
 
   public async readPageWithEtag(projectId: string): Promise<PageWithEtag> {
     const pagePath = this.getPagePath(projectId);
     const raw = await readFile(pagePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
-    const page = PageSchema.parse(parsed);
+    const page = this.sanitizePage(PageSchema.parse(parsed));
     const s = await stat(pagePath);
     return { page, etag: this.createWeakEtag({ mtimeMs: s.mtimeMs, size: s.size }) };
   }
 
+  private sanitizePage(page: Page): Page {
+    let changed = false;
+    const nextSections = page.sections.map((section) => {
+      let sectionChanged = false;
+      const nextComponents = section.components.map((component) => {
+        if (component.type !== "rich_text") return component;
+        const clean = sanitizeRichTextHtml(component.html);
+        if (clean === component.html) return component;
+        changed = true;
+        sectionChanged = true;
+        return { ...component, html: clean };
+      });
+      if (!sectionChanged) return section;
+      return { ...section, components: nextComponents };
+    });
+
+    if (!changed) return page;
+    return { ...page, sections: nextSections };
+  }
+
   private async writePageUnlocked(projectId: string, page: Page): Promise<void> {
-    const validated = PageSchema.parse(page);
+    const validated = this.sanitizePage(PageSchema.parse(page));
     await this.ensureProject(projectId);
     const pagePath = this.getPagePath(projectId);
     await writeFile(pagePath, JSON.stringify(validated, null, 2) + "\n", "utf8");
   }
 
   private async writePageWithEtagUnlocked(projectId: string, page: Page): Promise<string> {
-    const validated = PageSchema.parse(page);
+    const validated = this.sanitizePage(PageSchema.parse(page));
     await this.ensureProject(projectId);
     const pagePath = this.getPagePath(projectId);
     await writeFile(pagePath, JSON.stringify(validated, null, 2) + "\n", "utf8");

@@ -1,4 +1,5 @@
 import type { Page, Section, Component, Asset } from "@cac/shared";
+import { sanitizeRichTextHtml } from "../sanitize/rich-text.js";
 
 function escapeHtml(text: string): string {
   return text
@@ -66,7 +67,8 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
   if (component.type === "rich_text") {
     const style = renderBoxStyle(component.style);
     const styleAttr = style ? ` style="${style}"` : "";
-    return `<div class="richText"${styleAttr}>${component.html}</div>`;
+    const safe = sanitizeRichTextHtml(component.html);
+    return `<div class="richText"${styleAttr}>${safe}</div>`;
   }
 
   if (component.type === "image") {

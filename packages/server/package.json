@@ -20,6 +20,7 @@
     "image-size": "2.0.2",
     "multer": "2.1.1",
     "playwright": "1.59.1",
+    "sanitize-html": "2.17.3",
     "zod": "3.25.76"
   },
   "devDependencies": {
@@ -27,6 +28,7 @@
     "@types/express": "5.0.6",
     "@types/image-size": "0.8.0",
     "@types/multer": "2.1.0",
+    "@types/sanitize-html": "2.16.1",
     "typescript": "5.9.2",
     "vitest": "2.1.9"
   }

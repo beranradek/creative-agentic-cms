@@ -82,7 +82,7 @@ describe("renderPageHtml", () => {
               id: "c2",
               type: "rich_text",
               html: "<p>Hi</p>",
-              style: { maxWidth: 720, blockAlign: "center", textAlign: "center", padding: 8, backgroundColor: "#00ff00" },
+              style: { maxWidth: 720, textAlign: "center", padding: 8, backgroundColor: "#00ff00" },
             },
             {
               id: "c3",
@@ -108,5 +108,33 @@ describe("renderPageHtml", () => {
     expect(html).toContain("background-color:#00ff00");
 
     expect(html).toContain("justify-self:center");
+  });
+
+  it("sanitizes rich_text HTML (no scripts / handlers / javascript:)", () => {
+    const page = PageSchema.parse({
+      version: 1,
+      metadata: { title: "t", description: "", lang: "en" },
+      assets: [],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: {},
+          components: [
+            {
+              id: "c1",
+              type: "rich_text",
+              html: `<p onclick="alert(1)">Hello</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>`,
+            },
+          ],
+        },
+      ],
+    });
+
+    const { html } = renderPageHtml(page);
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("onclick=");
+    expect(html).not.toContain("javascript:");
   });
 });
