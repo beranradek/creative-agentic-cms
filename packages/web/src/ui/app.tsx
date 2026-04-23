@@ -3098,6 +3098,7 @@ function ComponentFields(props: {
           <div className="field">
             <label>Align</label>
             <select
+              data-testid="component-style-align"
               value={alignValue}
               disabled={!canEdit}
               onChange={(e) => {
@@ -3125,6 +3126,7 @@ function ComponentFields(props: {
             <label>Max width</label>
             <div className="row">
               <select
+                data-testid="component-style-maxwidth"
                 value={style.maxWidth ?? ""}
                 disabled={!canEdit}
                 onChange={(e) =>
@@ -3160,6 +3162,7 @@ function ComponentFields(props: {
             <label>Padding</label>
             <div className="row">
               <input
+                data-testid="component-style-padding"
                 type="range"
                 min={0}
                 max={96}
@@ -3179,6 +3182,7 @@ function ComponentFields(props: {
             <label>Background</label>
             <div className="row">
               <input
+                data-testid="component-style-bg"
                 type="color"
                 value={style.backgroundColor ?? "#000000"}
                 disabled={!canEdit}
