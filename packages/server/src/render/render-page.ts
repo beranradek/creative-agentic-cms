@@ -9,18 +9,53 @@ function escapeHtml(text: string): string {
     .replaceAll("'", "&#039;");
 }
 
+function renderBoxStyle(style: {
+  blockAlign: "left" | "center" | "right" | null;
+  textAlign: "left" | "center" | "right" | null;
+  maxWidth: 480 | 720 | 980 | null;
+  padding: number | null;
+  backgroundColor: string | null;
+}): string {
+  const styles: string[] = [];
+
+  if (style.maxWidth !== null) {
+    styles.push(`max-width:${style.maxWidth}px;`);
+    const align = style.blockAlign ?? "center";
+    if (align === "center") styles.push("margin:0 auto;");
+    if (align === "left") styles.push("margin:0 auto 0 0;");
+    if (align === "right") styles.push("margin:0 0 0 auto;");
+  }
+
+  if (style.textAlign !== null) styles.push(`text-align:${escapeHtml(style.textAlign)};`);
+  if (style.padding !== null) styles.push(`padding:${style.padding}px;`);
+  if (style.backgroundColor !== null) styles.push(`background-color:${escapeHtml(style.backgroundColor)};`);
+
+  return styles.join("");
+}
+
+function renderButtonJustify(textAlign: "left" | "center" | "right" | null): string {
+  if (textAlign === "center") return "center";
+  if (textAlign === "right") return "end";
+  return "start";
+}
+
 function renderComponent(component: Component, assetsById: Map<string, Asset>): string {
   if (component.type === "hero") {
     const bgAsset =
       component.backgroundImageAssetId && component.backgroundImageAssetId.length
         ? assetsById.get(component.backgroundImageAssetId)
         : null;
-    const style =
-      bgAsset && bgAsset.type === "image"
-        ? ` style="background-image: radial-gradient(900px 380px at 15% 15%, rgba(37,99,235,0.10), transparent 62%), radial-gradient(900px 380px at 70% 20%, rgba(6,182,212,0.08), transparent 62%), linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.92)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;"`
-        : "";
+    const styles: string[] = [];
+    if (bgAsset && bgAsset.type === "image") {
+      styles.push(
+        `background-image: radial-gradient(900px 380px at 15% 15%, rgba(37,99,235,0.10), transparent 62%), radial-gradient(900px 380px at 70% 20%, rgba(6,182,212,0.08), transparent 62%), linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.92)), url(assets/${escapeHtml(bgAsset.filename)}); background-size: auto, auto, cover, cover; background-position: 0 0, 0 0, center, center; background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;`
+      );
+    }
+    const boxStyle = renderBoxStyle(component.style);
+    if (boxStyle) styles.push(boxStyle);
+    const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
     return `
-      <div class="hero"${style}>
+      <div class="hero"${styleAttr}>
         <h1>${escapeHtml(component.headline)}</h1>
         <p>${escapeHtml(component.subheadline)}</p>
         <a class="cta" href="${escapeHtml(component.primaryCtaHref)}">${escapeHtml(component.primaryCtaText)}</a>
@@ -29,7 +64,9 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
   }
 
   if (component.type === "rich_text") {
-    return `<div class="richText">${component.html}</div>`;
+    const style = renderBoxStyle(component.style);
+    const styleAttr = style ? ` style="${style}"` : "";
+    return `<div class="richText"${styleAttr}>${component.html}</div>`;
   }
 
   if (component.type === "image") {
@@ -49,6 +86,11 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const imgStyles: string[] = [];
     if (component.style.radius !== null) imgStyles.push(`border-radius:${component.style.radius}px;`);
     if (component.style.fit !== null) imgStyles.push(`object-fit:${escapeHtml(component.style.fit)};`);
+    if (component.style.focalX !== null || component.style.focalY !== null) {
+      const x = component.style.focalX ?? 50;
+      const y = component.style.focalY ?? 50;
+      imgStyles.push(`object-position:${x}% ${y}%;`);
+    }
     const imgStyleAttr = imgStyles.length ? ` style="${imgStyles.join("")}"` : "";
 
     return `
@@ -60,8 +102,11 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
   }
 
   if (component.type === "contact_form") {
+    const boxStyle = renderBoxStyle(component.style);
+    const styleAttr = boxStyle ? ` style="${boxStyle}"` : "";
+    const justify = renderButtonJustify(component.style.textAlign);
     return `
-      <div class="contactForm" id="contact">
+      <div class="contactForm" id="contact"${styleAttr}>
         <h3>${escapeHtml(component.headline)}</h3>
         <form method="post" action="#" onsubmit="return false;">
           <div class="field">
@@ -76,7 +121,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
             <label>Message</label>
             <textarea name="message" rows="4"></textarea>
           </div>
-          <button class="btn btnPrimary" type="submit">${escapeHtml(component.submitLabel)}</button>
+          <button class="btn btnPrimary" type="submit" style="justify-self:${justify};">${escapeHtml(component.submitLabel)}</button>
         </form>
       </div>
     `;

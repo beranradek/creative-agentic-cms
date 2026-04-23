@@ -18,7 +18,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Section style: background, padding, max-width.
   - [x] Section-level settings: layout (stack/grid), spacing, visibility.
   - [x] Image component style: fit, align, max-width, radius.
-  - [ ] Component-level settings: style tokens (typography, spacing, alignment) for all components.
+  - [x] Component-level settings: style tokens (typography, spacing, alignment) for all components.
   - [ ] Strong defaults (required-but-nullable where needed for structured outputs).
 - [ ] Renderer parity:
   - [ ] Keep `web Preview` and `server export` rendering aligned (same semantics).
@@ -59,7 +59,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Upload images + store in `projects/<id>/assets`.
   - [x] Edit alt text (stored in `page.json`).
   - [x] Replace an existing image asset file (keep same `asset.id`).
-  - [ ] Set image focal point (x/y) for cropping & cover.
+  - [x] Set image focal point (x/y) for cropping & cover.
 - [ ] Image editor (MVP):
   - [x] Modal editor with zoom/pan/crop presets + output resize.
   - [x] Non-destructive workflow (save as new asset + optional replace usages).

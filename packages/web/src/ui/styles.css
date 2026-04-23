@@ -550,6 +550,26 @@ body {
   display: block;
 }
 
+.imageMedia {
+  position: relative;
+}
+
+.imageFocalDot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: rgba(37, 99, 235, 0.95);
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
+}
+
+.imageFocalDotAuto {
+  background: rgba(100, 116, 139, 0.85);
+}
+
 .imageCaption {
   margin-top: 8px;
   color: var(--muted);

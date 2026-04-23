@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod";
 import {
   AssetSchema,
+  COMPONENT_MAX_WIDTHS,
   PageSchema,
   SECTION_GRID_COLUMNS,
   SECTION_LAYOUTS,
   SECTION_MAX_WIDTHS,
+  TEXT_ALIGNS,
   type Asset,
   type Component,
   type Page,
@@ -39,6 +41,38 @@ type PaletteTab = "project" | "agent" | "add" | "assets";
 const DEFAULT_PROJECT_ID = "demo";
 const UNDO_LIMIT = 50;
 
+type ComponentBoxStyle = {
+  blockAlign: (typeof TEXT_ALIGNS)[number] | null;
+  textAlign: (typeof TEXT_ALIGNS)[number] | null;
+  maxWidth: (typeof COMPONENT_MAX_WIDTHS)[number] | null;
+  padding: number | null;
+  backgroundColor: string | null;
+};
+
+function computeBoxOuterStyle(style: ComponentBoxStyle): React.CSSProperties {
+  const out: React.CSSProperties = {};
+  if (style.maxWidth !== null) out.maxWidth = style.maxWidth;
+  const align = style.blockAlign ?? null;
+  if (style.maxWidth !== null && align) {
+    out.margin = align === "center" ? "0 auto" : align === "left" ? "0 auto 0 0" : "0 0 0 auto";
+  }
+  return out;
+}
+
+function computeBoxInnerStyle(style: ComponentBoxStyle): React.CSSProperties {
+  const out: React.CSSProperties = {};
+  if (style.textAlign !== null) out.textAlign = style.textAlign;
+  if (style.padding !== null) out.padding = style.padding;
+  if (style.backgroundColor !== null) out.backgroundColor = style.backgroundColor;
+  return out;
+}
+
+function computeButtonJustify(textAlign: ComponentBoxStyle["textAlign"]): React.CSSProperties["justifySelf"] {
+  if (textAlign === "center") return "center";
+  if (textAlign === "right") return "end";
+  return "start";
+}
+
 function createId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
 }
@@ -63,6 +97,7 @@ function createComponent(type: Component["type"]): Component {
       primaryCtaText: "Contact",
       primaryCtaHref: "#contact",
       backgroundImageAssetId: null,
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
     };
   }
   if (type === "rich_text") {
@@ -70,10 +105,17 @@ function createComponent(type: Component["type"]): Component {
       id: createId("cmp"),
       type: "rich_text",
       html: "<p>Write something compelling. Keep it clear, human, and specific.</p>",
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
     };
   }
   if (type === "contact_form") {
-    return { id: createId("cmp"), type: "contact_form", headline: "Contact", submitLabel: "Send" };
+    return {
+      id: createId("cmp"),
+      type: "contact_form",
+      headline: "Contact",
+      submitLabel: "Send",
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+    };
   }
   if (type === "image") {
     throw new Error("Use createImageComponent(assetId) for image components.");
@@ -82,7 +124,13 @@ function createComponent(type: Component["type"]): Component {
 }
 
 function createImageComponent(assetId: string): Component {
-  return { id: createId("cmp"), type: "image", assetId, caption: "", style: { fit: null, maxWidth: null, align: null, radius: null } };
+  return {
+    id: createId("cmp"),
+    type: "image",
+    assetId,
+    caption: "",
+    style: { fit: null, maxWidth: null, align: null, focalX: null, focalY: null, radius: null },
+  };
 }
 
 function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
@@ -2266,6 +2314,7 @@ function PreviewComponent(props: {
     onDropCapture: onDropTarget,
   };
   if (component.type === "hero") {
+    const outerStyle = computeBoxOuterStyle(component.style);
     const bgAsset =
       component.backgroundImageAssetId ? page.assets.find((a) => a.type === "image" && a.id === component.backgroundImageAssetId) : null;
     const heroStyle =
@@ -2282,9 +2331,11 @@ function PreviewComponent(props: {
             backgroundRepeat: ["no-repeat", "no-repeat", "no-repeat", "no-repeat"].join(", "),
           }
         : undefined;
+    const innerStyle = computeBoxInnerStyle(component.style);
     return (
       <div
         className={wrapperClass}
+        style={outerStyle}
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
@@ -2301,7 +2352,7 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="hero" style={{ ...heroStyle, pointerEvents: isSelected ? "auto" : "none" }}>
+        <div className="hero" style={{ ...heroStyle, ...innerStyle, pointerEvents: isSelected ? "auto" : "none" }}>
           <h1
             contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
@@ -2349,10 +2400,13 @@ function PreviewComponent(props: {
   }
 
   if (component.type === "rich_text") {
+    const outerStyle = computeBoxOuterStyle(component.style);
+    const innerStyle = computeBoxInnerStyle(component.style);
     if (isSelected && canEdit) {
       return (
         <div
           className={wrapperClass}
+          style={outerStyle}
           data-testid="preview-item"
           data-component-id={component.id}
           data-component-type={component.type}
@@ -2370,6 +2424,7 @@ function PreviewComponent(props: {
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
+            style={innerStyle}
             contentEditable
             suppressContentEditableWarning
             onClick={(e) => e.stopPropagation()}
@@ -2388,6 +2443,7 @@ function PreviewComponent(props: {
     return (
       <div
         className={wrapperClass}
+        style={outerStyle}
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
@@ -2397,7 +2453,7 @@ function PreviewComponent(props: {
         <div
           key={`${component.id}-view`}
           className="richText"
-          style={{ pointerEvents: "none" }}
+          style={{ ...innerStyle, pointerEvents: "none" }}
           dangerouslySetInnerHTML={{ __html: component.html }}
         />
       </div>
@@ -2405,9 +2461,13 @@ function PreviewComponent(props: {
   }
 
   if (component.type === "contact_form") {
+    const outerStyle = computeBoxOuterStyle(component.style);
+    const innerStyle = computeBoxInnerStyle(component.style);
+    const buttonJustify = computeButtonJustify(component.style.textAlign);
     return (
       <div
         className={wrapperClass}
+        style={outerStyle}
         data-testid="preview-item"
         data-component-id={component.id}
         data-component-type={component.type}
@@ -2424,7 +2484,7 @@ function PreviewComponent(props: {
             </button>
           </div>
         ) : null}
-        <div className="contactForm" id="contact" style={{ pointerEvents: isSelected ? "auto" : "none" }}>
+        <div className="contactForm" id="contact" style={{ ...innerStyle, pointerEvents: isSelected ? "auto" : "none" }}>
           <h3
             contentEditable={isSelected && canEdit}
             suppressContentEditableWarning
@@ -2451,7 +2511,7 @@ function PreviewComponent(props: {
               <label>Message</label>
               <textarea rows={4} />
             </div>
-            <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()}>
+            <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()} style={{ justifySelf: buttonJustify }}>
               <span
                 contentEditable={isSelected && canEdit}
                 suppressContentEditableWarning
@@ -2481,9 +2541,13 @@ function PreviewComponent(props: {
       margin:
         align === "center" ? "0 auto" : align === "left" ? "0 auto 0 0" : align === "right" ? "0 0 0 auto" : undefined,
     };
+    const focalActive = component.style.focalX !== null || component.style.focalY !== null;
+    const focalX = component.style.focalX ?? 50;
+    const focalY = component.style.focalY ?? 50;
     const imgStyle: React.CSSProperties = {
       borderRadius: component.style.radius ?? undefined,
       objectFit: component.style.fit ?? undefined,
+      objectPosition: focalActive ? `${focalX}% ${focalY}%` : undefined,
     };
     return (
       <div
@@ -2524,7 +2588,29 @@ function PreviewComponent(props: {
           </div>
         ) : null}
         <div className="imageBlock" style={{ ...blockStyle, pointerEvents: isSelected ? "auto" : "none" }}>
-          <img src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`} alt={asset.alt} style={imgStyle} />
+          <div className="imageMedia">
+            <img
+              src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`}
+              alt={asset.alt}
+              style={imgStyle}
+              onClick={(e) => {
+                if (!isSelected || !canEdit) return;
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                if (!rect.width || !rect.height) return;
+                const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+                onUpdate({ ...component, style: { ...component.style, focalX: Math.round(x), focalY: Math.round(y) } });
+              }}
+            />
+            {isSelected && canEdit ? (
+              <div
+                className={focalActive ? "imageFocalDot" : "imageFocalDot imageFocalDotAuto"}
+                style={{ left: `${focalX}%`, top: `${focalY}%` }}
+                aria-hidden
+              />
+            ) : null}
+          </div>
           {isSelected && canEdit ? (
             <div
               className="imageCaption"
@@ -3002,6 +3088,111 @@ function ComponentFields(props: {
 }) {
   const { component, imageAssets, onUploadImageAssetOnly, canEdit, onUpdate } = props;
 
+  const renderBoxStyleCard = (style: ComponentBoxStyle, setStyle: (next: ComponentBoxStyle) => void) => {
+    const alignValue = style.textAlign ?? style.blockAlign ?? "";
+    return (
+      <div className="card">
+        <div className="cardTitle">Style</div>
+        <div className="stack">
+          <div className="field">
+            <label>Align</label>
+            <select
+              value={alignValue}
+              disabled={!canEdit}
+              onChange={(e) => {
+                const next =
+                  e.target.value === ""
+                    ? null
+                    : e.target.value === "left"
+                      ? "left"
+                      : e.target.value === "right"
+                        ? "right"
+                        : "center";
+                setStyle({ ...style, blockAlign: next, textAlign: next });
+              }}
+            >
+              <option value="">(auto)</option>
+              {TEXT_ALIGNS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label>Max width</label>
+            <div className="row">
+              <select
+                value={style.maxWidth ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  setStyle({
+                    ...style,
+                    maxWidth:
+                      e.target.value === ""
+                        ? null
+                        : e.target.value === "480"
+                          ? 480
+                          : e.target.value === "720"
+                            ? 720
+                            : e.target.value === "980"
+                              ? 980
+                              : null,
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                {COMPONENT_MAX_WIDTHS.map((w) => (
+                  <option key={w} value={String(w)}>
+                    {w}
+                  </option>
+                ))}
+              </select>
+              <button className="btn" disabled={!canEdit} onClick={() => setStyle({ ...style, maxWidth: null })}>
+                Auto
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Padding</label>
+            <div className="row">
+              <input
+                type="range"
+                min={0}
+                max={96}
+                value={style.padding ?? 0}
+                disabled={!canEdit}
+                onChange={(e) => setStyle({ ...style, padding: Number(e.target.value) })}
+                style={{ flex: 1 }}
+              />
+              <span className="badge">{style.padding ?? 0}px</span>
+              <button className="btn" disabled={!canEdit} onClick={() => setStyle({ ...style, padding: null })}>
+                Auto
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Background</label>
+            <div className="row">
+              <input
+                type="color"
+                value={style.backgroundColor ?? "#000000"}
+                disabled={!canEdit}
+                onChange={(e) => setStyle({ ...style, backgroundColor: e.target.value })}
+              />
+              <button className="btn" disabled={!canEdit} onClick={() => setStyle({ ...style, backgroundColor: null })}>
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (component.type === "hero") {
     return (
       <div className="stack">
@@ -3055,21 +3246,27 @@ function ComponentFields(props: {
             />
           </div>
         </div>
+
+        {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
       </div>
     );
   }
 
   if (component.type === "rich_text") {
     return (
-      <div className="field">
-        <label>HTML</label>
-        <textarea
-          rows={8}
-          value={component.html}
-          disabled={!canEdit}
-          onChange={(e) => onUpdate({ ...component, html: e.target.value })}
-        />
-        <div className="muted">MVP: edit raw HTML. Next: true inline editing.</div>
+      <div className="stack">
+        <div className="field">
+          <label>HTML</label>
+          <textarea
+            rows={8}
+            value={component.html}
+            disabled={!canEdit}
+            onChange={(e) => onUpdate({ ...component, html: e.target.value })}
+          />
+          <div className="muted">MVP: edit raw HTML. Next: true inline editing.</div>
+        </div>
+
+        {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
       </div>
     );
   }
@@ -3093,6 +3290,8 @@ function ComponentFields(props: {
             onChange={(e) => onUpdate({ ...component, submitLabel: e.target.value })}
           />
         </div>
+
+        {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
       </div>
     );
   }
@@ -3144,6 +3343,61 @@ function ComponentFields(props: {
                 <option value="center">center</option>
                 <option value="right">right</option>
               </select>
+            </div>
+
+            <div className="field">
+              <label>Focal point</label>
+              <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div className="muted" style={{ marginBottom: 6 }}>
+                    X
+                  </div>
+                  <input
+                    data-testid="image-style-focalx"
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={component.style.focalX ?? 50}
+                    disabled={!canEdit}
+                    onChange={(e) => onUpdate({ ...component, style: { ...component.style, focalX: Number(e.target.value) } })}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+                <span className="badge">{(component.style.focalX ?? 50).toFixed(0)}%</span>
+              </div>
+              <div className="row" style={{ gap: 10, alignItems: "center", marginTop: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div className="muted" style={{ marginBottom: 6 }}>
+                    Y
+                  </div>
+                  <input
+                    data-testid="image-style-focaly"
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={component.style.focalY ?? 50}
+                    disabled={!canEdit}
+                    onChange={(e) => onUpdate({ ...component, style: { ...component.style, focalY: Number(e.target.value) } })}
+                    style={{ width: "100%" }}
+                  />
+                </div>
+                <span className="badge">{(component.style.focalY ?? 50).toFixed(0)}%</span>
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, style: { ...component.style, focalX: null, focalY: null } })}
+                >
+                  Auto
+                </button>
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, style: { ...component.style, focalX: 50, focalY: 50 } })}
+                >
+                  Center
+                </button>
+              </div>
+              <div className="muted">Tip: with the image selected, click inside the image to set the focal point.</div>
             </div>
 
             <div className="field">

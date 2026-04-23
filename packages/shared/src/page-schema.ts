@@ -22,6 +22,19 @@ export const ImageAssetSchema = z.object({
 
 export const AssetSchema = z.discriminatedUnion("type", [ImageAssetSchema]);
 
+export const COMPONENT_MAX_WIDTHS = [480, 720, 980] as const;
+const ComponentMaxWidthSchema = z.union([z.literal(480), z.literal(720), z.literal(980)]).nullable().default(null);
+
+export const TEXT_ALIGNS = ["left", "center", "right"] as const;
+const TextAlignSchema = z.union([z.literal("left"), z.literal("center"), z.literal("right")]).nullable().default(null);
+
+const BoxPaddingSchema = z.number().int().min(0).max(96).nullable().default(null);
+const BackgroundColorSchema = z
+  .string()
+  .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+  .nullable()
+  .default(null);
+
 export const HeroComponentSchema = z.object({
   id: ComponentIdSchema,
   type: z.literal("hero"),
@@ -30,12 +43,30 @@ export const HeroComponentSchema = z.object({
   primaryCtaText: z.string().default("Get started"),
   primaryCtaHref: z.string().default("#contact"),
   backgroundImageAssetId: AssetIdSchema.nullable().default(null),
+  style: z
+    .object({
+      blockAlign: TextAlignSchema,
+      textAlign: TextAlignSchema,
+      maxWidth: ComponentMaxWidthSchema,
+      padding: BoxPaddingSchema,
+      backgroundColor: BackgroundColorSchema,
+    })
+    .default({}),
 });
 
 export const RichTextComponentSchema = z.object({
   id: ComponentIdSchema,
   type: z.literal("rich_text"),
   html: z.string().default("<p>Your text here.</p>"),
+  style: z
+    .object({
+      blockAlign: TextAlignSchema,
+      textAlign: TextAlignSchema,
+      maxWidth: ComponentMaxWidthSchema,
+      padding: BoxPaddingSchema,
+      backgroundColor: BackgroundColorSchema,
+    })
+    .default({}),
 });
 
 export const ImageComponentSchema = z.object({
@@ -48,6 +79,8 @@ export const ImageComponentSchema = z.object({
       fit: z.union([z.literal("cover"), z.literal("contain")]).nullable().default(null),
       maxWidth: z.union([z.literal(480), z.literal(720), z.literal(980)]).nullable().default(null),
       align: z.union([z.literal("left"), z.literal("center"), z.literal("right")]).nullable().default(null),
+      focalX: z.number().int().min(0).max(100).nullable().default(null),
+      focalY: z.number().int().min(0).max(100).nullable().default(null),
       radius: z.number().int().min(0).max(32).nullable().default(null),
     })
     .default({}),
@@ -58,6 +91,15 @@ export const ContactFormComponentSchema = z.object({
   type: z.literal("contact_form"),
   headline: z.string().default("Contact us"),
   submitLabel: z.string().default("Send"),
+  style: z
+    .object({
+      blockAlign: TextAlignSchema,
+      textAlign: TextAlignSchema,
+      maxWidth: ComponentMaxWidthSchema,
+      padding: BoxPaddingSchema,
+      backgroundColor: BackgroundColorSchema,
+    })
+    .default({}),
 });
 
 export const ComponentSchema = z.discriminatedUnion("type", [
