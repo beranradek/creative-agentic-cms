@@ -1,6 +1,6 @@
 import sanitizeHtml from "sanitize-html";
 
-const ALLOWED_TAGS = ["p", "br", "strong", "em", "a", "ul", "ol", "li"] as const;
+const ALLOWED_TAGS = ["p", "br", "strong", "em", "a", "ul", "ol", "li", "b", "i", "div"] as const;
 
 export function sanitizeRichTextHtml(inputHtml: string): string {
   return sanitizeHtml(inputHtml, {
@@ -8,8 +8,12 @@ export function sanitizeRichTextHtml(inputHtml: string): string {
     allowedAttributes: {
       a: ["href"],
     },
+    transformTags: {
+      b: "strong",
+      i: "em",
+      div: "p",
+    },
     allowedSchemes: ["http", "https", "mailto"],
     allowProtocolRelative: false,
   });
 }
-

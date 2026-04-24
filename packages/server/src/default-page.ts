@@ -1,7 +1,7 @@
-import { type Page } from "@cac/shared";
+import { PageSchema, type Page } from "@cac/shared";
 
 export function createDefaultPage(): Page {
-  return {
+  return PageSchema.parse({
     version: 1,
     metadata: {
       title: "New Page",
@@ -10,6 +10,5 @@ export function createDefaultPage(): Page {
     },
     sections: [],
     assets: [],
-  };
+  });
 }
-

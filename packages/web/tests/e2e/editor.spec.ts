@@ -133,8 +133,10 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   const cards = page.getByTestId("structure-section-card");
   await expect(cards).toHaveCount(2);
 
-  // Swap order: move first card onto second.
-  await cards.nth(0).dragTo(cards.nth(1));
+  // Swap order: drag first section handle onto second.
+  const handles = page.getByTestId("structure-section-drag-handle");
+  await expect(handles).toHaveCount(2);
+  await handles.nth(0).dragTo(cards.nth(1));
 
   const types = await page.getByTestId("preview-item").evaluateAll((els) =>
     els.map((el) => el.getAttribute("data-component-type"))
@@ -152,6 +154,33 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   );
   expect(typesAfter[0]).toBe("rich_text");
   expect(typesAfter[1]).toBe("hero");
+});
+
+test("sections can be reordered via drag and drop in Preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_section_dnd_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const handles = page.getByTestId("preview-section-handle");
+  const wraps = page.getByTestId("preview-section-wrap");
+  await expect(handles).toHaveCount(2);
+  await expect(wraps).toHaveCount(2);
+
+  // Move first section after the second by dropping to the bottom half of the target.
+  const targetBox = await wraps.nth(1).boundingBox();
+  if (!targetBox) throw new Error("Missing section target bounding box");
+  await handles.nth(0).dragTo(wraps.nth(1), { targetPosition: { x: Math.max(2, Math.floor(targetBox.width / 2)), y: Math.max(2, Math.floor(targetBox.height - 2)) } });
+
+  const types = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types[0]).toBe("rich_text");
+  expect(types[1]).toBe("hero");
 });
 
 test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
@@ -176,6 +205,50 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await ensurePaletteTab(page, "project");
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("2 components");
+});
+
+test("selection follows component when moved across sections in Preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_cross_section_selection_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  await hero.click();
+
+  await expect(page.locator(".previewItemSelected")).toHaveCount(1);
+  await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
+
+  await hero.dragTo(text);
+
+  await expect(page.locator(".previewItemSelected")).toHaveCount(1);
+  await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
+});
+
+test("components can be moved across sections via Structure list drop", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_structure_cross_section_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const cards = page.getByTestId("structure-section-card");
+  await expect(cards).toHaveCount(2);
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await hero.click();
+  await cards.nth(1).getByRole("button", { name: "Move here" }).click();
+
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 });
@@ -311,6 +384,78 @@ test("section visibility hides in Preview and export", async ({ page }) => {
   expect(html).toContain("Write something compelling.");
 });
 
+test("section label can be renamed from Structure and persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_label_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByTestId("section-label").dblclick();
+  await page.getByTestId("section-label-input").fill("Above the fold");
+  await page.getByTestId("section-label-input").press("Enter");
+  await expect(sectionCard).toContainText("Above the fold");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await expect(page.getByTestId("structure-section-card").first()).toContainText("Above the fold");
+});
+
+test("preview drag-and-drop uses before/after drop position", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_drop_pos_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  const form = page.locator('[data-testid="preview-item"][data-component-type="contact_form"]');
+  await expect(text).toHaveCount(1);
+  await expect(form).toHaveCount(1);
+
+  const box = await form.boundingBox();
+  if (!box) throw new Error("Missing form bounding box");
+
+  // Drop in bottom half => insert after.
+  await text.dragTo(form, {
+    targetPosition: { x: Math.max(2, Math.floor(box.width / 2)), y: Math.max(2, Math.floor(box.height - 2)) },
+  });
+
+  const types = await page.getByTestId("preview-item").evaluateAll((els) => els.map((el) => el.getAttribute("data-component-type")));
+  expect(types[0]).toBe("contact_form");
+  expect(types[1]).toBe("rich_text");
+
+  const box2 = await form.boundingBox();
+  if (!box2) throw new Error("Missing form bounding box after reorder");
+
+  // Drop in top half => insert before.
+  await text.dragTo(form, { targetPosition: { x: Math.max(2, Math.floor(box2.width / 2)), y: 2 } });
+  const types2 = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types2[0]).toBe("rich_text");
+  expect(types2[1]).toBe("contact_form");
+
+  const dropzone = page.getByTestId("preview-dropzone").first();
+  await text.dragTo(dropzone);
+  const types3 = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types3[0]).toBe("contact_form");
+  expect(types3[1]).toBe("rich_text");
+});
+
 test("can duplicate and delete a component from Preview toolbar", async ({ page }) => {
   await page.goto("/");
 
@@ -364,6 +509,40 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await page.getByTestId("reload-page").click();
 
   await expect(page.locator(".richText")).toContainText("Hello inline editor");
+});
+
+test("rich text formatting toolbar can bold selection and persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_rich_toolbar_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+
+  await page.locator('[data-testid="preview-item"][data-component-type="rich_text"]').click();
+  await expect(page.getByTestId("richtext-toolbar")).toBeVisible();
+
+  const editable = page.locator(".richTextEditable");
+  await editable.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("Hello world");
+
+  // Select "world" and apply bold.
+  await page.keyboard.press("Control+Shift+ArrowLeft");
+  await page.getByTestId("richtext-bold").click();
+
+  // Blur + persist.
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  const pageJson = (await fetchPageJson(page, projectId)) as {
+    sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+  };
+  const html = pageJson.sections[0]?.components[0]?.html ?? "";
+  expect(html).toContain("<strong>");
+  expect(html).toContain("world");
 });
 
 test("image can be replaced from Preview toolbar (uploads new asset)", async ({ page }) => {
@@ -500,6 +679,32 @@ test("image style (radius + max width) persists", async ({ page }) => {
   expect(radiusAfter).toBe("20px");
 });
 
+test("page theme affects Preview and export CSS vars", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_theme_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  // Change accent color and verify Preview reflects it.
+  await page.getByTestId("theme-accent").fill("#ff0000");
+  const cta = page.locator(".cta").first();
+  const bg = await cta.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toBe("rgb(255, 0, 0)");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("export-site").click();
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const cssRes = await page.request.get(`/projects/${projectId}/output/styles.css`);
+  expect(cssRes.ok()).toBeTruthy();
+  const css = await cssRes.text();
+  expect(css).toContain("--site-accent:#ff0000;");
+});
+
 test("exported HTML includes section + image styles", async ({ page }) => {
   await page.goto("/");
 
@@ -615,6 +820,90 @@ test("exported HTML includes component box styles", async ({ page }) => {
   expect(html).toContain("justify-self:center;");
 });
 
+test("exported HTML includes gradients and button styles", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_export_gradients_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  // Add a form into the first section so we have contact_form button styling too.
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+
+  // Section gradient background
+  await page.getByTestId("section-bg-gradient-enabled").check();
+  await page.getByTestId("section-bg-gradient-from").fill("#111111");
+  await page.getByTestId("section-bg-gradient-to").fill("#222222");
+  await page.getByTestId("section-bg-gradient-angle").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "90");
+
+  // Component gradient + hero CTA styles
+  const heroItem = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await heroItem.click();
+  await page.getByTestId("component-style-bg-gradient-enabled").check();
+  await page.getByTestId("component-style-bg-gradient-from").fill("#abcdef");
+  await page.getByTestId("component-style-bg-gradient-to").fill("#123456");
+  await page.getByTestId("component-style-bg-gradient-angle").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "180");
+
+  await page.getByTestId("hero-cta-variant").selectOption("outline");
+  await page.getByTestId("hero-cta-text").fill("#ff0000");
+  await page.getByTestId("hero-cta-border").fill("#00ff00");
+  await page.getByTestId("hero-cta-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "18");
+
+  // Contact form submit button styles
+  const formItem = page.locator('[data-testid="preview-item"][data-component-type="contact_form"]');
+  await formItem.click();
+  await page.getByTestId("contact-submit-bg").fill("#0000ff");
+  await page.getByTestId("contact-submit-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "6");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("export-site").click();
+
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).toContain("background:linear-gradient(90deg, #111111, #222222);");
+  expect(html).toContain("background:linear-gradient(180deg, #abcdef, #123456);");
+  expect(html).toContain("background:transparent;");
+  expect(html).toContain("color:#ff0000;");
+  expect(html).toContain("border-color:#00ff00;");
+  expect(html).toContain("background:#0000ff;");
+  expect(html).toContain("border-radius:6px;");
+});
+
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
   test.skip(!process.env.CAC_E2E_SCREENSHOT, "Set CAC_E2E_SCREENSHOT=1 to enable.");
 
@@ -629,4 +918,28 @@ test("can capture a preview screenshot (server Playwright required)", async ({ p
   await page.getByTestId("capture-screenshot").click();
 
   await expect(page.getByTestId("preview-screenshot")).toBeVisible();
+});
+
+test("agent can apply a simple edit (requires OPENAI_API_KEY on server)", async ({ page }) => {
+  test.skip(!process.env.CAC_E2E_AGENT, "Set CAC_E2E_AGENT=1 to enable.");
+
+  await page.goto("/");
+  const projectId = `e2e_agent_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await expect(page.locator(".hero h1")).toBeVisible();
+
+  const headline = `E2E Agent Headline ${Date.now()}`;
+
+  await ensurePaletteTab(page, "agent");
+  await page.getByTestId("agent-run-mode").selectOption("apply");
+  await expect(page.getByTestId("agent-run")).toHaveText("Run agent");
+  await page.getByTestId("agent-text").fill(
+    `Set the hero headline exactly to "${headline}". Do not change anything else.`
+  );
+  await page.getByTestId("agent-run").click();
+
+  await expect(page.locator(".hero h1")).toContainText(headline, { timeout: 60_000 });
 });

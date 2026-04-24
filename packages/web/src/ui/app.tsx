@@ -1,13 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { z } from "zod";
 import {
   AssetSchema,
   COMPONENT_MAX_WIDTHS,
+  BUTTON_VARIANTS,
   PageSchema,
   SECTION_GRID_COLUMNS,
   SECTION_LAYOUTS,
   SECTION_MAX_WIDTHS,
+  THEME_PRESETS,
   TEXT_ALIGNS,
+  resolveTheme,
+  resolvedThemeToCssVars,
   type Asset,
   type Component,
   type Page,
@@ -47,6 +52,11 @@ type ComponentBoxStyle = {
   maxWidth: (typeof COMPONENT_MAX_WIDTHS)[number] | null;
   padding: number | null;
   backgroundColor: string | null;
+  backgroundGradient: {
+    from: string | null;
+    to: string | null;
+    angle: number | null;
+  } | null;
 };
 
 function computeBoxOuterStyle(style: ComponentBoxStyle): React.CSSProperties {
@@ -63,7 +73,14 @@ function computeBoxInnerStyle(style: ComponentBoxStyle): React.CSSProperties {
   const out: React.CSSProperties = {};
   if (style.textAlign !== null) out.textAlign = style.textAlign;
   if (style.padding !== null) out.padding = style.padding;
-  if (style.backgroundColor !== null) out.backgroundColor = style.backgroundColor;
+  const gradientFrom = style.backgroundGradient?.from ?? null;
+  const gradientTo = style.backgroundGradient?.to ?? null;
+  if (gradientFrom && gradientTo) {
+    const angle = style.backgroundGradient?.angle ?? 135;
+    out.background = `linear-gradient(${angle}deg, ${gradientFrom}, ${gradientTo})`;
+  } else if (style.backgroundColor !== null) {
+    out.backgroundColor = style.backgroundColor;
+  }
   return out;
 }
 
@@ -71,6 +88,39 @@ function computeButtonJustify(textAlign: ComponentBoxStyle["textAlign"]): React.
   if (textAlign === "center") return "center";
   if (textAlign === "right") return "end";
   return "start";
+}
+
+function computeBackgroundValue(gradient: { from: string | null; to: string | null; angle: number | null } | null, solid: string | null): string | null {
+  const from = gradient?.from ?? null;
+  const to = gradient?.to ?? null;
+  if (from && to) {
+    const angle = gradient?.angle ?? 135;
+    return `linear-gradient(${angle}deg, ${from}, ${to})`;
+  }
+  return solid ?? null;
+}
+
+function computeButtonInlineStyle(style: {
+  variant: (typeof BUTTON_VARIANTS)[number] | null;
+  bgColor: string | null;
+  textColor: string | null;
+  borderColor: string | null;
+  radius: number | null;
+}): React.CSSProperties {
+  const out: React.CSSProperties = {};
+  if (style.radius !== null) out.borderRadius = style.radius;
+  if (style.variant === "outline") {
+    out.background = "transparent";
+    out.color = style.textColor ?? "var(--site-accent)";
+    out.borderColor = style.borderColor ?? "var(--site-accent)";
+    out.borderStyle = "solid";
+    out.borderWidth = 1;
+    return out;
+  }
+  if (style.bgColor !== null) out.background = style.bgColor;
+  if (style.textColor !== null) out.color = style.textColor;
+  if (style.borderColor !== null) out.borderColor = style.borderColor;
+  return out;
 }
 
 function createId(prefix: string): string {
@@ -81,7 +131,7 @@ function createSection(label: string): Section {
   return {
     id: createId("sec"),
     label,
-    style: { background: null, padding: null, maxWidth: null },
+    style: { background: null, backgroundGradient: null, padding: null, maxWidth: null },
     settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
     components: [],
   };
@@ -96,8 +146,9 @@ function createComponent(type: Component["type"]): Component {
       subheadline: "A creative, local-first CMS editor with an agent that can reshape the page as you build.",
       primaryCtaText: "Contact",
       primaryCtaHref: "#contact",
+      ctaStyle: { variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
       backgroundImageAssetId: null,
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "rich_text") {
@@ -105,7 +156,7 @@ function createComponent(type: Component["type"]): Component {
       id: createId("cmp"),
       type: "rich_text",
       html: "<p>Write something compelling. Keep it clear, human, and specific.</p>",
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "contact_form") {
@@ -114,7 +165,8 @@ function createComponent(type: Component["type"]): Component {
       type: "contact_form",
       headline: "Contact",
       submitLabel: "Send",
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      submitStyle: { variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "image") {
@@ -144,6 +196,85 @@ function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
   return copy;
 }
 
+function moveByIndexAllowEnd<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex < 0 || fromIndex >= items.length) return items;
+  if (toIndex < 0 || toIndex > items.length) return items;
+  const copy = items.slice();
+  const [item] = copy.splice(fromIndex, 1);
+  if (item === undefined) return items;
+  const adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+  const clamped = Math.max(0, Math.min(copy.length, adjustedIndex));
+  if (clamped === fromIndex) return items;
+  copy.splice(clamped, 0, item);
+  return copy;
+}
+
+function escapeHtmlText(input: string): string {
+  return input.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return ch;
+    }
+  });
+}
+
+function plainTextToRichTextHtml(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!normalized) return "";
+  const escaped = escapeHtmlText(normalized).replace(/\n/g, "<br>");
+  return `<p>${escaped}</p>`;
+}
+
+function sanitizeRichTextHref(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#") || trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return trimmed;
+  if (trimmed.startsWith("mailto:")) return trimmed;
+  try {
+    const url = new URL(trimmed, window.location.href);
+    if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function insertRichTextLinkAtSelection(container: HTMLElement, href: string) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount < 1) return;
+  const range = selection.getRangeAt(0);
+  const ancestor =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+  if (!ancestor || !container.contains(ancestor)) return;
+
+  const selectedText = selection.toString().trim();
+  const link = document.createElement("a");
+  link.setAttribute("href", href);
+  link.textContent = selectedText.length ? selectedText : href;
+
+  range.deleteContents();
+  range.insertNode(link);
+
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(link);
+  nextRange.setEndAfter(link);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+}
+
 function sanitizeRichTextHtml(inputHtml: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${inputHtml}</div>`, "text/html");
@@ -155,21 +286,6 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
   const allowedTags = new Set(["p", "br", "strong", "em", "a", "ul", "ol", "li"]);
 
-  function sanitizeHref(raw: string | null): string | null {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (trimmed.startsWith("#") || trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return trimmed;
-    if (trimmed.startsWith("mailto:")) return trimmed;
-    try {
-      const url = new URL(trimmed, window.location.href);
-      if (url.protocol === "http:" || url.protocol === "https:") return url.href;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
   function appendSanitized(parent: HTMLElement, node: Node) {
     if (node.nodeType === Node.TEXT_NODE) {
       parent.appendChild(outDoc.createTextNode(node.textContent ?? ""));
@@ -178,7 +294,8 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
-    const tag = el.tagName.toLowerCase();
+    const rawTag = el.tagName.toLowerCase();
+    const tag = rawTag === "b" ? "strong" : rawTag === "i" ? "em" : rawTag === "div" ? "p" : rawTag;
 
     if (!allowedTags.has(tag)) {
       for (const child of Array.from(el.childNodes)) appendSanitized(parent, child);
@@ -187,7 +304,7 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
     const outEl = outDoc.createElement(tag);
     if (tag === "a") {
-      const href = sanitizeHref(el.getAttribute("href"));
+      const href = sanitizeRichTextHref(el.getAttribute("href"));
       if (href) outEl.setAttribute("href", href);
       const target = el.getAttribute("target");
       if (target === "_blank") {
@@ -211,6 +328,8 @@ function sanitizeInlineText(text: string): string {
 type DragPayload =
   | { kind: "section"; sectionId: string }
   | { kind: "component"; sectionId: string; componentId: string };
+
+type DropPosition = "before" | "after";
 
 let inMemoryDragPayload: DragPayload | null = null;
 
@@ -252,6 +371,88 @@ function getDragPayload(e: React.DragEvent): DragPayload | null {
     }
   }
   return inMemoryDragPayload;
+}
+
+function computeDropPosition(rect: DOMRect, clientY: number): DropPosition {
+  const mid = rect.top + rect.height / 2;
+  return clientY >= mid ? "after" : "before";
+}
+
+let lastAutoScrollAtMs = 0;
+function findScrollParent(start: HTMLElement): HTMLElement | null {
+  let el: HTMLElement | null = start;
+  while (el) {
+    const style = getComputedStyle(el);
+    const overflowY = style.overflowY;
+    const canScroll = (overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight + 1;
+    if (canScroll) return el;
+    el = el.parentElement;
+  }
+  const scrolling = document.scrollingElement;
+  return scrolling && scrolling instanceof HTMLElement ? scrolling : null;
+}
+
+function autoScrollDuringDrag(target: HTMLElement, clientY: number) {
+  const now = Date.now();
+  if (now - lastAutoScrollAtMs < 30) return;
+  lastAutoScrollAtMs = now;
+
+  const scrollParent = findScrollParent(target);
+  if (!scrollParent) return;
+  const rect = scrollParent.getBoundingClientRect();
+
+  const edge = 60;
+  const maxStep = 22;
+  const topDist = clientY - rect.top;
+  const bottomDist = rect.bottom - clientY;
+
+  if (topDist < edge) {
+    const t = Math.max(0, Math.min(1, (edge - topDist) / edge));
+    scrollParent.scrollTop -= Math.ceil(maxStep * t);
+  } else if (bottomDist < edge) {
+    const t = Math.max(0, Math.min(1, (edge - bottomDist) / edge));
+    scrollParent.scrollTop += Math.ceil(maxStep * t);
+  }
+}
+
+function moveComponentByIndex(args: {
+  sections: Section[];
+  fromSectionId: string;
+  fromComponentId: string;
+  toSectionId: string;
+  toIndex: number; // 0..len (append allowed)
+}): Section[] {
+  const { sections, fromSectionId, fromComponentId, toSectionId, toIndex } = args;
+  const fromSection = sections.find((s) => s.id === fromSectionId);
+  const toSection = sections.find((s) => s.id === toSectionId);
+  if (!fromSection || !toSection) return sections;
+  const moving = fromSection.components.find((c) => c.id === fromComponentId);
+  if (!moving) return sections;
+
+  if (fromSectionId === toSectionId) {
+    const fromIndex = fromSection.components.findIndex((c) => c.id === fromComponentId);
+    if (fromIndex < 0) return sections;
+    const remaining = fromSection.components.slice();
+    remaining.splice(fromIndex, 1);
+    const adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    const clamped = Math.max(0, Math.min(remaining.length, adjustedIndex));
+    if (clamped === fromIndex) return sections;
+    remaining.splice(clamped, 0, moving);
+    return sections.map((s) => (s.id === fromSectionId ? { ...s, components: remaining } : s));
+  }
+
+  return sections.map((s) => {
+    if (s.id === fromSectionId) {
+      return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
+    }
+    if (s.id === toSectionId) {
+      const next = s.components.slice();
+      const clamped = Math.max(0, Math.min(next.length, toIndex));
+      next.splice(clamped, 0, moving);
+      return { ...s, components: next };
+    }
+    return s;
+  });
 }
 
 function getEtagHeader(res: Response): string | null {
@@ -582,6 +783,12 @@ export function App() {
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+  const [dragOverComponentSectionId, setDragOverComponentSectionId] = useState<string | null>(null);
+  const [previewSectionDropHint, setPreviewSectionDropHint] = useState<{ sectionId: string; position: DropPosition } | null>(
+    null
+  );
+  const [editingSectionLabelId, setEditingSectionLabelId] = useState<string | null>(null);
+  const [editingSectionLabelValue, setEditingSectionLabelValue] = useState("");
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -597,6 +804,7 @@ export function App() {
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
+  const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [sttLang, setSttLang] = useState(() => {
@@ -632,6 +840,9 @@ export function App() {
   const latestPageJsonRef = useRef<string | null>(null);
   const page = state.kind === "ready" ? state.editor.page : null;
   const pageJson = useMemo(() => (page ? JSON.stringify(page) : null), [page]);
+  const resolvedSiteTheme = useMemo(() => resolveTheme(page?.theme ?? null), [page?.theme]);
+  const siteCssVars = useMemo(() => resolvedThemeToCssVars(resolvedSiteTheme), [resolvedSiteTheme]);
+  const siteCssVarStyle = useMemo(() => siteCssVars as unknown as React.CSSProperties, [siteCssVars]);
   const isDirty = pageJson !== null && lastSavedJsonRef.current !== pageJson;
   const canEdit = state.kind === "ready" && loadedProjectId === projectId;
   const activeProjectId = loadedProjectId;
@@ -1712,6 +1923,7 @@ export function App() {
                             <div className="field" style={{ width: 160 }}>
                               <label>Run</label>
                               <select
+                                data-testid="agent-run-mode"
                                 value={agentRunMode}
                                 onChange={(e) => setAgentRunMode(e.target.value === "suggest" ? "suggest" : "apply")}
                                 disabled={isAgentRunning}
@@ -1949,40 +2161,142 @@ export function App() {
       <div className="panel">
         <div className="panelHeader">
           <h2>Preview</h2>
-          <span className="badge">{page ? `${page.sections.length} sections` : "…"}</span>
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <select
+              aria-label="Preview viewport"
+              data-testid="preview-viewport"
+              value={previewDeviceWidth === null ? "auto" : String(previewDeviceWidth)}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "auto") {
+                  setPreviewDeviceWidth(null);
+                  return;
+                }
+                const n = Number(v);
+                setPreviewDeviceWidth(Number.isFinite(n) && n > 0 ? n : null);
+              }}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid var(--line)",
+                background: "rgba(255,255,255,0.85)",
+                color: "var(--text)",
+              }}
+            >
+              <option value="auto">auto</option>
+              <option value="375">mobile (375)</option>
+              <option value="768">tablet (768)</option>
+              <option value="1024">desktop (1024)</option>
+            </select>
+            <span className="badge">{page ? `${page.sections.length} sections` : "…"}</span>
+          </div>
         </div>
         <div className="panelBody">
           <div className="canvas">
+            <div className="previewViewport" style={previewDeviceWidth ? { maxWidth: previewDeviceWidth, margin: "0 auto" } : undefined}>
             <div className="preview">
               {page ? (
-                <div className="stack" style={{ gap: 18 }}>
+                <div className="sitePreviewRoot" style={siteCssVarStyle}>
+                <div className="stack" style={{ gap: "var(--site-space-3)" }}>
                   {page.sections
                     .filter((section) => section.settings.visible)
-                    .map((section) => (
-                  <div
-                    key={section.id}
-                    className="previewSection"
-                    data-testid="preview-section"
-                    data-section-id={section.id}
-                    style={{
-                      background: section.style.background ?? undefined,
-                      padding: section.style.padding !== null ? section.style.padding : undefined,
-                      maxWidth: section.style.maxWidth ?? 980,
-                    }}
-                  >
-                    <div
-                      data-testid="preview-section-inner"
-                      style={{
-                        gap: section.settings.gap ?? 12,
-                        display: section.settings.layout === "grid" ? "grid" : "flex",
-                        gridTemplateColumns:
-                          section.settings.layout === "grid"
-                            ? `repeat(${section.settings.gridColumns ?? 2}, minmax(0, 1fr))`
-                            : undefined,
-                        alignItems: section.settings.layout === "grid" ? "start" : undefined,
-                        flexDirection: section.settings.layout === "grid" ? undefined : "column",
-                      }}
-                    >
+                    .map((section) => {
+                      const hintPos =
+                        previewSectionDropHint && previewSectionDropHint.sectionId === section.id ? previewSectionDropHint.position : null;
+                      return (
+                        <div
+                          key={section.id}
+                          className={
+                            hintPos
+                              ? hintPos === "before"
+                                ? "previewSectionWrap previewSectionWrapDropBefore"
+                                : "previewSectionWrap previewSectionWrapDropAfter"
+                              : "previewSectionWrap"
+                          }
+                          data-testid="preview-section-wrap"
+                          data-section-id={section.id}
+                          onDragOver={(e) => {
+                            if (!canEdit) return;
+                            const payload = getDragPayload(e);
+                            if (!payload || payload.kind !== "section") return;
+                            e.preventDefault();
+                            autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const position = computeDropPosition(rect, e.clientY);
+                            setPreviewSectionDropHint((prev) =>
+                              prev && prev.sectionId === section.id && prev.position === position ? prev : { sectionId: section.id, position }
+                            );
+                          }}
+                          onDragLeave={(e) => {
+                            const related = e.relatedTarget;
+                            if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                            setPreviewSectionDropHint((prev) => (prev?.sectionId === section.id ? null : prev));
+                          }}
+                          onDrop={(e) => {
+                            if (!canEdit) return;
+                            const payload = getDragPayload(e);
+                            if (!payload || payload.kind !== "section") return;
+                            e.preventDefault();
+                            clearDragPayload();
+                            setPreviewSectionDropHint(null);
+                            if (payload.sectionId === section.id) return;
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const position = computeDropPosition(rect, e.clientY);
+                            updatePage((prev) => {
+                              const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
+                              const targetIndex = prev.sections.findIndex((s) => s.id === section.id);
+                              if (fromIndex < 0 || targetIndex < 0) return prev;
+                              const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
+                              return PageSchema.parse({ ...prev, sections: moveByIndexAllowEnd(prev.sections, fromIndex, toIndex) });
+                            });
+                          }}
+                        >
+                          {canEdit ? (
+                            <div
+                              className="previewSectionHandle"
+                              data-testid="preview-section-handle"
+                              data-section-id={section.id}
+                              draggable
+                              onDragStart={(e) => {
+                                setDragPayload(e, { kind: "section", sectionId: section.id });
+                              }}
+                              onDragEnd={() => {
+                                setTimeout(() => clearDragPayload(), 0);
+                                setPreviewSectionDropHint(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelected({ sectionId: section.id });
+                              }}
+                              title="Drag section"
+                            >
+                              ⋮⋮
+                            </div>
+                          ) : null}
+
+                          <div
+                            className="previewSection"
+                            data-testid="preview-section"
+                            data-section-id={section.id}
+                            style={{
+                              background: computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? undefined,
+                              padding: section.style.padding !== null ? section.style.padding : undefined,
+                              maxWidth: section.style.maxWidth ?? 980,
+                            }}
+                          >
+                            <div
+                              data-testid="preview-section-inner"
+                              style={{
+                                gap: section.settings.gap ?? 12,
+                                display: section.settings.layout === "grid" ? "grid" : "flex",
+                                gridTemplateColumns:
+                                  section.settings.layout === "grid"
+                                    ? `repeat(${section.settings.gridColumns ?? 2}, minmax(0, 1fr))`
+                                    : undefined,
+                                alignItems: section.settings.layout === "grid" ? "start" : undefined,
+                                flexDirection: section.settings.layout === "grid" ? undefined : "column",
+                              }}
+                            >
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
@@ -2030,38 +2344,23 @@ export function App() {
                               replaceAllUsages: false,
                             });
                           }}
-                          onMoveHere={(fromSectionId, fromComponentId) => {
+                          onMoveHere={(_fromSectionId, fromComponentId, position) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
+                              const targetIndex = toSection.components.findIndex((c) => c.id === component.id);
+                              if (targetIndex < 0) return prev;
+                              const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
 
-                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
-                              if (!moving) return prev;
-
-                              const nextSections = prev.sections.map((s) => {
-                                if (s.id === actualFromSectionId && s.id === section.id) {
-                                  const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
-                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
-                                  if (fromIndex < 0 || toIndex < 0) return s;
-                                  return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
-                                }
-
-                                if (s.id === actualFromSectionId) {
-                                  return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
-                                }
-
-                                if (s.id === section.id) {
-                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
-                                  if (toIndex < 0) return s;
-                                  const next = s.components.slice();
-                                  next.splice(toIndex, 0, moving);
-                                  return { ...s, components: next };
-                                }
-
-                                return s;
+                              const nextSections = moveComponentByIndex({
+                                sections: prev.sections,
+                                fromSectionId: actualFromSectionId,
+                                fromComponentId,
+                                toSectionId: section.id,
+                                toIndex,
                               });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
@@ -2076,47 +2375,40 @@ export function App() {
                         <PreviewDropZone
                           key={`${section.id}-dropzone`}
                           sectionId={section.id}
-                          onMoveToEnd={(fromSectionId, fromComponentId) => {
+                          onMoveToEnd={(_fromSectionId, fromComponentId) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
-                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
-                              if (!moving) return prev;
+                              const nextSections = moveComponentByIndex({
+                                sections: prev.sections,
+                                fromSectionId: actualFromSectionId,
+                                fromComponentId,
+                                toSectionId: section.id,
+                                toIndex: toSection.components.length,
+                              });
 
-                            const nextSections = prev.sections.map((s) => {
-                              if (s.id === actualFromSectionId && s.id === section.id) {
-                                const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
-                                const toIndex = s.components.length - 1;
-                                if (fromIndex < 0) return s;
-                                return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
-                              }
-                              if (s.id === actualFromSectionId) {
-                                return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
-                              }
-                              if (s.id === section.id) {
-                                return { ...s, components: [...s.components, moving] };
-                              }
-                              return s;
+                              return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            return PageSchema.parse({ ...prev, sections: nextSections });
-                          });
-
-                          setSelected((prevSel) =>
-                            prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                          );
+                            setSelected((prevSel) =>
+                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
+                            );
                           }}
                         />
                       </div>
-                  </div>
-                  ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
                 </div>
               ) : (
                 <div className="muted">Loading…</div>
               )}
+            </div>
             </div>
           </div>
         </div>
@@ -2161,6 +2453,269 @@ export function App() {
                 </div>
               </div>
 
+              <div className="card">
+                <div className="cardTitle">Theme</div>
+                <div className="stack">
+                  <div className="field">
+                    <label>Preset</label>
+                    <select
+                      data-testid="theme-preset"
+                      value={page.theme.preset ?? ""}
+                      disabled={!canEdit}
+                      onChange={(e) => {
+                        const nextPreset = e.target.value ? (e.target.value as (typeof THEME_PRESETS)[number]) : null;
+                        updatePage((prev) =>
+                          PageSchema.parse({
+                            ...prev,
+                            theme: {
+                              preset: nextPreset,
+                              fontFamily: null,
+                              baseFontSize: null,
+                              lineHeight: null,
+                              bgColor: null,
+                              textColor: null,
+                              mutedTextColor: null,
+                              accentColor: null,
+                              spaceBase: null,
+                              radius: null,
+                            },
+                          })
+                        );
+                      }}
+                    >
+                      <option value="">(default)</option>
+                      {THEME_PRESETS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Background</label>
+                      <input
+                        type="color"
+                        data-testid="theme-bg"
+                        value={page.theme.bgColor ?? resolvedSiteTheme.bgColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() => updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: null } }))}
+                        disabled={!canEdit || page.theme.bgColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Text</label>
+                      <input
+                        type="color"
+                        value={page.theme.textColor ?? resolvedSiteTheme.textColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: null } }))
+                        }
+                        disabled={!canEdit || page.theme.textColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Muted</label>
+                      <input
+                        type="color"
+                        value={page.theme.mutedTextColor ?? resolvedSiteTheme.mutedTextColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: null } })
+                          )
+                        }
+                        disabled={!canEdit || page.theme.mutedTextColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Accent</label>
+                      <input
+                        type="color"
+                        data-testid="theme-accent"
+                        value={page.theme.accentColor ?? resolvedSiteTheme.accentColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: null } }))
+                        }
+                        disabled={!canEdit || page.theme.accentColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div className="field" style={{ width: 220 }}>
+                      <label>Font family (CSS)</label>
+                      <input
+                        value={page.theme.fontFamily ?? ""}
+                        placeholder="(auto)"
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, fontFamily: raw ? raw : null } })
+                          );
+                        }}
+                      />
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Base size</label>
+                      <input
+                        inputMode="numeric"
+                        data-testid="theme-base-font"
+                        value={String(page.theme.baseFontSize ?? resolvedSiteTheme.baseFontSize)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(12, Math.min(22, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, baseFontSize: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, baseFontSize: null } }))
+                        }
+                        disabled={!canEdit || page.theme.baseFontSize === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Line height</label>
+                      <input
+                        value={String(page.theme.lineHeight ?? resolvedSiteTheme.lineHeight)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(1.1, Math.min(1.8, n)) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, lineHeight: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, lineHeight: null } }))
+                        }
+                        disabled={!canEdit || page.theme.lineHeight === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Spacing</label>
+                      <input
+                        inputMode="numeric"
+                        value={String(page.theme.spaceBase ?? resolvedSiteTheme.spaceBase)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(4, Math.min(14, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, spaceBase: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, spaceBase: null } }))
+                        }
+                        disabled={!canEdit || page.theme.spaceBase === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Radius</label>
+                      <input
+                        inputMode="numeric"
+                        value={String(page.theme.radius ?? resolvedSiteTheme.radius)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(0, Math.min(28, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, radius: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, radius: null } }))
+                        }
+                        disabled={!canEdit || page.theme.radius === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="list">
                 {page.sections.map((section, idx) => (
                   <div
@@ -2168,27 +2723,28 @@ export function App() {
                     className="card"
                     data-testid="structure-section-card"
                     data-section-id={section.id}
-                    draggable={canEdit}
-                    onDragStart={(e) => {
-                      if (!canEdit) return;
-                      setDragPayload(e, { kind: "section", sectionId: section.id });
-                    }}
-                    onDragEnd={() => clearDragPayload()}
-                    onDragOver={(e) => {
+                    onDragOverCapture={(e) => {
                       if (!canEdit) return;
                       const payload = getDragPayload(e);
-                      if (!payload || payload.kind !== "section") return;
-                      e.preventDefault();
-                      setDragOverSectionId(section.id);
+                      if (!payload) return;
+                      if (payload.kind === "section") {
+                        e.preventDefault();
+                        setDragOverSectionId(section.id);
+                      }
                     }}
-                    onDragLeave={() => setDragOverSectionId((prev) => (prev === section.id ? null : prev))}
-                    onDrop={(e) => {
+                    onDragLeave={(e) => {
+                      const related = e.relatedTarget;
+                      if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                      setDragOverSectionId((prev) => (prev === section.id ? null : prev));
+                    }}
+                    onDropCapture={(e) => {
                       if (!canEdit) return;
                       const payload = getDragPayload(e);
                       if (!payload || payload.kind !== "section") return;
                       e.preventDefault();
                       clearDragPayload();
                       setDragOverSectionId(null);
+
                       if (payload.sectionId === section.id) return;
                       updatePage((prev) => {
                         const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
@@ -2204,7 +2760,69 @@ export function App() {
                   >
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="row" style={{ gap: 10 }}>
-                        <div className="cardTitle">{section.label}</div>
+                        {canEdit ? (
+                          <span
+                            className="dragHandle"
+                            data-testid="structure-section-drag-handle"
+                            draggable={canEdit && editingSectionLabelId !== section.id}
+                            title="Drag to reorder section"
+                            onDragStart={(e) => {
+                              if (!canEdit) return;
+                              if (editingSectionLabelId === section.id) return;
+                              setDragPayload(e, { kind: "section", sectionId: section.id });
+                            }}
+                            onDragEnd={() => setTimeout(() => clearDragPayload(), 0)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            ⋮⋮
+                          </span>
+                        ) : null}
+                        {editingSectionLabelId === section.id && canEdit ? (
+                          <input
+                            data-testid="section-label-input"
+                            value={editingSectionLabelValue}
+                            onChange={(e) => setEditingSectionLabelValue(e.target.value)}
+                            autoFocus
+                            style={{ width: 220 }}
+                            onBlur={() => {
+                              const next = sanitizeInlineText(editingSectionLabelValue);
+                              setEditingSectionLabelId(null);
+                              setEditingSectionLabelValue("");
+                              if (!next) return;
+                              updatePage((prev) =>
+                                PageSchema.parse({
+                                  ...prev,
+                                  sections: prev.sections.map((s) => (s.id === section.id ? { ...s, label: next } : s)),
+                                })
+                              );
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setEditingSectionLabelId(null);
+                                setEditingSectionLabelValue("");
+                                return;
+                              }
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="cardTitle"
+                            data-testid="section-label"
+                            onDoubleClick={() => {
+                              if (!canEdit) return;
+                              setEditingSectionLabelId(section.id);
+                              setEditingSectionLabelValue(section.label);
+                            }}
+                            title={canEdit ? "Double-click to rename" : undefined}
+                          >
+                            {section.label}
+                          </div>
+                        )}
                         {!section.settings.visible ? <span className="badge">hidden</span> : null}
                       </div>
                       <div className="row">
@@ -2218,6 +2836,36 @@ export function App() {
                         >
                           ↓
                         </button>
+                        {selected?.componentId ? (
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              if (!canEdit) return;
+                              const fromComponentId = selected?.componentId;
+                              if (!fromComponentId) return;
+                              updatePage((prev) => {
+                                const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
+                                const toSection = prev.sections.find((s) => s.id === section.id);
+                                if (!fromSection || !toSection) return prev;
+                                const actualFromSectionId = fromSection.id;
+                                const nextSections = moveComponentByIndex({
+                                  sections: prev.sections,
+                                  fromSectionId: actualFromSectionId,
+                                  fromComponentId,
+                                  toSectionId: section.id,
+                                  toIndex: toSection.components.length,
+                                });
+                                return PageSchema.parse({ ...prev, sections: nextSections });
+                              });
+
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            }}
+                            disabled={!canEdit}
+                            title="Move selected component to this section"
+                          >
+                            Move here
+                          </button>
+                        ) : null}
                         <button className="btn btnDanger" onClick={() => removeSection(section.id)} disabled={!canEdit}>
                           Remove
                         </button>
@@ -2227,6 +2875,109 @@ export function App() {
                       </div>
                     </div>
                     <div className="muted">{section.components.length} components</div>
+                    <div
+                      className="structureComponentDropZone"
+                      data-testid="structure-component-dropzone"
+                      data-section-id={section.id}
+                      style={
+                        dragOverComponentSectionId === section.id
+                          ? { borderColor: "rgba(37, 99, 235, 0.6)", background: "rgba(37, 99, 235, 0.08)" }
+                          : undefined
+                      }
+                      onDragOverCapture={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragEnterCapture={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragOver={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragEnter={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragLeave={(e) => {
+                        const related = e.relatedTarget;
+                        if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                        setDragOverComponentSectionId((prev) => (prev === section.id ? null : prev));
+                      }}
+                      onDropCapture={(e) => {
+                        if (!canEdit) return;
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearDragPayload();
+                        setDragOverComponentSectionId(null);
+                        updatePage((prev) => {
+                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+                          const toSection = prev.sections.find((s) => s.id === section.id);
+                          if (!fromSection || !toSection) return prev;
+                          const actualFromSectionId = fromSection.id;
+                          const nextSections = moveComponentByIndex({
+                            sections: prev.sections,
+                            fromSectionId: actualFromSectionId,
+                            fromComponentId: payload.componentId,
+                            toSectionId: section.id,
+                            toIndex: toSection.components.length,
+                          });
+                          return PageSchema.parse({ ...prev, sections: nextSections });
+                        });
+
+                        setSelected((prevSel) =>
+                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
+                        );
+                      }}
+                      onDrop={(e) => {
+                        if (!canEdit) return;
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearDragPayload();
+                        setDragOverComponentSectionId(null);
+                        updatePage((prev) => {
+                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+                          const toSection = prev.sections.find((s) => s.id === section.id);
+                          if (!fromSection || !toSection) return prev;
+                          const actualFromSectionId = fromSection.id;
+                          const nextSections = moveComponentByIndex({
+                            sections: prev.sections,
+                            fromSectionId: actualFromSectionId,
+                            fromComponentId: payload.componentId,
+                            toSectionId: section.id,
+                            toIndex: toSection.components.length,
+                          });
+                          return PageSchema.parse({ ...prev, sections: nextSections });
+                        });
+
+                        setSelected((prevSel) =>
+                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
+                        );
+                      }}
+                    >
+                      Drop component here
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2323,7 +3074,7 @@ function PreviewComponent(props: {
   onDuplicate: () => void;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onEditImage?: () => void;
-  onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
+  onMoveHere: (fromSectionId: string, fromComponentId: string, position: DropPosition) => void;
 }) {
   const {
     sectionId,
@@ -2340,13 +3091,28 @@ function PreviewComponent(props: {
     onEditImage,
     onMoveHere,
   } = props;
-  const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
+  const [isHovering, setIsHovering] = useState(false);
+  const [dropHint, setDropHint] = useState<{ isOver: boolean; position: DropPosition }>({ isOver: false, position: "before" });
+  const richTextRef = useRef<HTMLDivElement | null>(null);
+  const showToolbar = (isSelected || isHovering) && canEdit;
+
+  const wrapperClass = [
+    "previewItem",
+    isSelected ? "previewItemSelected" : "",
+    dropHint.isOver ? (dropHint.position === "before" ? "previewItemDropBefore" : "previewItemDropAfter") : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const onDragOverTarget = (e: React.DragEvent) => {
     if (!canEdit) return;
     const payload = getDragPayload(e);
     if (!payload || payload.kind !== "component") return;
     e.preventDefault();
+    autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = computeDropPosition(rect, e.clientY);
+    setDropHint((prev) => (prev.isOver && prev.position === position ? prev : { isOver: true, position }));
   };
 
   const onDropTarget = (e: React.DragEvent) => {
@@ -2355,8 +3121,11 @@ function PreviewComponent(props: {
     if (!payload || payload.kind !== "component") return;
     e.preventDefault();
     clearDragPayload();
+    setDropHint((prev) => (prev.isOver ? { ...prev, isOver: false } : prev));
     if (payload.sectionId === sectionId && payload.componentId === component.id) return;
-    onMoveHere(payload.sectionId, payload.componentId);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = computeDropPosition(rect, e.clientY);
+    onMoveHere(payload.sectionId, payload.componentId, position);
   };
 
   const dragProps = {
@@ -2370,10 +3139,15 @@ function PreviewComponent(props: {
       // Defer clearing so drop handlers can still read the in-memory payload if needed.
       setTimeout(() => clearDragPayload(), 0);
     },
-    onDragOver: onDragOverTarget,
     onDragOverCapture: onDragOverTarget,
-    onDrop: onDropTarget,
+    onDragLeave: (e: React.DragEvent) => {
+      const related = e.relatedTarget;
+      if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+      setDropHint((prev) => (prev.isOver ? { ...prev, isOver: false } : prev));
+    },
     onDropCapture: onDropTarget,
+    onMouseEnter: () => setIsHovering(true),
+    onMouseLeave: () => setIsHovering(false),
   };
   if (component.type === "hero") {
     const outerStyle = computeBoxOuterStyle(component.style);
@@ -2394,6 +3168,7 @@ function PreviewComponent(props: {
           }
         : undefined;
     const innerStyle = computeBoxInnerStyle(component.style);
+    const ctaInlineStyle = computeButtonInlineStyle(component.ctaStyle);
     return (
       <div
         className={wrapperClass}
@@ -2404,7 +3179,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
@@ -2441,7 +3216,7 @@ function PreviewComponent(props: {
           >
             {component.subheadline}
           </p>
-          <a className="cta" href={component.primaryCtaHref} onClick={(e) => e.preventDefault()}>
+          <a className="cta" href={component.primaryCtaHref} style={ctaInlineStyle} onClick={(e) => e.preventDefault()}>
             <span
               contentEditable={isSelected && canEdit}
               suppressContentEditableWarning
@@ -2466,6 +3241,14 @@ function PreviewComponent(props: {
     const innerStyle = computeBoxInnerStyle(component.style);
     const safeHtml = sanitizeRichTextHtml(component.html);
     if (isSelected && canEdit) {
+      const runCommand = (command: string) => {
+        richTextRef.current?.focus();
+        try {
+          document.execCommand(command);
+        } catch {
+          // ignore
+        }
+      };
       return (
         <div
           className={wrapperClass}
@@ -2476,26 +3259,123 @@ function PreviewComponent(props: {
           {...dragProps}
           onClick={() => onSelect()}
         >
-          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
-              Duplicate
+          {showToolbar ? (
+            <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+              <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+                Duplicate
+              </button>
+              <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+                Delete
+              </button>
+            </div>
+          ) : null}
+          <div className="richTextFormatBar" data-testid="richtext-toolbar" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="btn"
+              data-testid="richtext-bold"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("bold");
+              }}
+            >
+              Bold
             </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
-              Delete
+            <button
+              className="btn"
+              data-testid="richtext-italic"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("italic");
+              }}
+            >
+              Italic
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-link"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const raw = window.prompt("Enter link URL (https://, mailto:, #anchor, /path)");
+                const href = sanitizeRichTextHref(raw);
+                if (!href) return;
+                const container = richTextRef.current;
+                if (!container) return;
+                container.focus();
+                insertRichTextLinkAtSelection(container, href);
+              }}
+            >
+              Link
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-ul"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("insertUnorderedList");
+              }}
+            >
+              • List
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-ol"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("insertOrderedList");
+              }}
+            >
+              1. List
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-clear"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("removeFormat");
+                runCommand("unlink");
+              }}
+            >
+              Clear
             </button>
           </div>
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
             style={innerStyle}
+            ref={richTextRef}
             contentEditable
             suppressContentEditableWarning
             onClick={(e) => e.stopPropagation()}
+            onPaste={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const rawHtml = e.clipboardData.getData("text/html");
+              const rawText = e.clipboardData.getData("text/plain");
+              const raw = rawHtml && rawHtml.trim().length ? rawHtml : plainTextToRichTextHtml(rawText);
+              const clean = sanitizeRichTextHtml(raw);
+              const container = richTextRef.current;
+              if (!container) return;
+              container.focus();
+              try {
+                document.execCommand("insertHTML", false, clean);
+              } catch {
+                // Fallback: append at end.
+                container.innerHTML = sanitizeRichTextHtml(`${container.innerHTML}${clean}`);
+              }
+            }}
             onBlur={(e) => {
               const raw = e.currentTarget.innerHTML;
               const clean = sanitizeRichTextHtml(raw);
               e.currentTarget.innerHTML = clean;
-              onUpdate({ ...component, html: clean });
+              flushSync(() => {
+                onUpdate({ ...component, html: clean });
+              });
             }}
             dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
@@ -2513,6 +3393,16 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
+        {showToolbar ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div
           key={`${component.id}-view`}
           className="richText"
@@ -2527,6 +3417,7 @@ function PreviewComponent(props: {
     const outerStyle = computeBoxOuterStyle(component.style);
     const innerStyle = computeBoxInnerStyle(component.style);
     const buttonJustify = computeButtonJustify(component.style.textAlign);
+    const submitInlineStyle = computeButtonInlineStyle(component.submitStyle);
     return (
       <div
         className={wrapperClass}
@@ -2537,7 +3428,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
@@ -2574,7 +3465,12 @@ function PreviewComponent(props: {
               <label>Message</label>
               <textarea rows={4} />
             </div>
-            <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()} style={{ justifySelf: buttonJustify }}>
+            <button
+              className="btn btnPrimary"
+              type="submit"
+              onClick={(e) => e.preventDefault()}
+              style={{ justifySelf: buttonJustify, ...submitInlineStyle }}
+            >
               <span
                 contentEditable={isSelected && canEdit}
                 suppressContentEditableWarning
@@ -2621,7 +3517,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <label className="btn" data-testid="preview-image-replace" style={!canEdit ? { opacity: 0.6, pointerEvents: "none" } : undefined}>
               Replace
@@ -2717,9 +3613,14 @@ function PreviewDropZone(props: {
         const payload = getDragPayload(e);
         if (!payload || payload.kind !== "component") return;
         e.preventDefault();
+        autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
         setIsOver(true);
       }}
-      onDragLeave={() => setIsOver(false)}
+      onDragLeave={(e) => {
+        const related = e.relatedTarget;
+        if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+        setIsOver(false);
+      }}
       onDrop={(e) => {
         const payload = getDragPayload(e);
         if (!payload || payload.kind !== "component") return;
@@ -2826,18 +3727,107 @@ function Inspector(props: {
                   onChange={(e) =>
                     onUpdate({
                       ...section,
-                      style: { ...section.style, background: e.target.value },
+                      style: { ...section.style, background: e.target.value, backgroundGradient: null },
                     })
                   }
                 />
                 <button
                   className="btn"
-                  onClick={() => onUpdate({ ...section, style: { ...section.style, background: null } })}
+                  onClick={() => onUpdate({ ...section, style: { ...section.style, background: null, backgroundGradient: null } })}
                   disabled={!canEdit}
                 >
                   Clear
                 </button>
               </div>
+
+              <label className="row" style={{ justifyContent: "space-between", marginTop: 10 }}>
+                <span className="muted">Gradient</span>
+                <input
+                  data-testid="section-bg-gradient-enabled"
+                  type="checkbox"
+                  checked={section.style.backgroundGradient !== null}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    onUpdate({
+                      ...section,
+                      style: {
+                        ...section.style,
+                        background: enabled ? null : section.style.background,
+                        backgroundGradient: enabled ? { from: "#ffffff", to: "#e2e8f0", angle: 135 } : null,
+                      },
+                    });
+                  }}
+                />
+              </label>
+
+              {section.style.backgroundGradient ? (
+                <div className="stack" style={{ marginTop: 10 }}>
+                  <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                    <span className="muted">From</span>
+                    <input
+                      data-testid="section-bg-gradient-from"
+                      type="color"
+                      value={section.style.backgroundGradient.from ?? "#ffffff"}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        onUpdate({
+                          ...section,
+                          style: {
+                            ...section.style,
+                            background: null,
+                            backgroundGradient: { ...section.style.backgroundGradient!, from: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                    <span className="muted">To</span>
+                    <input
+                      data-testid="section-bg-gradient-to"
+                      type="color"
+                      value={section.style.backgroundGradient.to ?? "#e2e8f0"}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        onUpdate({
+                          ...section,
+                          style: {
+                            ...section.style,
+                            background: null,
+                            backgroundGradient: { ...section.style.backgroundGradient!, to: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Angle</label>
+                    <div className="row">
+                      <input
+                        data-testid="section-bg-gradient-angle"
+                        type="range"
+                        min={0}
+                        max={360}
+                        value={section.style.backgroundGradient.angle ?? 135}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          onUpdate({
+                            ...section,
+                            style: {
+                              ...section.style,
+                              background: null,
+                              backgroundGradient: { ...section.style.backgroundGradient!, angle: Number(e.target.value) },
+                            },
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      />
+                      <span className="badge">{(section.style.backgroundGradient.angle ?? 135).toFixed(0)}°</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="field">
@@ -3051,6 +4041,16 @@ function Inspector(props: {
               data-testid="inspector-component-row"
               data-component-id={c.id}
               data-component-type={c.type}
+              draggable={canEdit}
+              onDragStart={(e) => {
+                if (!canEdit) return;
+                setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
+              }}
+              onDragEnd={() => {
+                // In some browsers/automation harnesses, `drop` can race with `dragend`.
+                // Defer clearing so drop handlers can still read the in-memory payload if needed.
+                setTimeout(() => clearDragPayload(), 50);
+              }}
               style={
                 dragOverComponentId === c.id
                   ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
@@ -3091,7 +4091,11 @@ function Inspector(props: {
                     if (!canEdit) return;
                     setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
                   }}
-                  onDragEnd={() => clearDragPayload()}
+                  onDragEnd={() => {
+                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
+                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
+                    setTimeout(() => clearDragPayload(), 50);
+                  }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮
@@ -3248,12 +4252,89 @@ function ComponentFields(props: {
                 type="color"
                 value={style.backgroundColor ?? "#000000"}
                 disabled={!canEdit}
-                onChange={(e) => setStyle({ ...style, backgroundColor: e.target.value })}
+                onChange={(e) => setStyle({ ...style, backgroundColor: e.target.value, backgroundGradient: null })}
               />
               <button className="btn" disabled={!canEdit} onClick={() => setStyle({ ...style, backgroundColor: null })}>
                 Clear
               </button>
             </div>
+
+            <label className="row" style={{ justifyContent: "space-between", marginTop: 10 }}>
+              <span className="muted">Gradient</span>
+              <input
+                data-testid="component-style-bg-gradient-enabled"
+                type="checkbox"
+                checked={style.backgroundGradient !== null}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setStyle({
+                    ...style,
+                    backgroundColor: enabled ? null : style.backgroundColor,
+                    backgroundGradient: enabled ? { from: "#ffffff", to: "#e2e8f0", angle: 135 } : null,
+                  });
+                }}
+              />
+            </label>
+
+            {style.backgroundGradient ? (
+              <div className="stack" style={{ marginTop: 10 }}>
+                <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                  <span className="muted">From</span>
+                  <input
+                    data-testid="component-style-bg-gradient-from"
+                    type="color"
+                    value={style.backgroundGradient.from ?? "#ffffff"}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setStyle({
+                        ...style,
+                        backgroundColor: null,
+                        backgroundGradient: { ...style.backgroundGradient!, from: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                  <span className="muted">To</span>
+                  <input
+                    data-testid="component-style-bg-gradient-to"
+                    type="color"
+                    value={style.backgroundGradient.to ?? "#e2e8f0"}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setStyle({
+                        ...style,
+                        backgroundColor: null,
+                        backgroundGradient: { ...style.backgroundGradient!, to: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Angle</label>
+                  <div className="row">
+                    <input
+                      data-testid="component-style-bg-gradient-angle"
+                      type="range"
+                      min={0}
+                      max={360}
+                      value={style.backgroundGradient.angle ?? 135}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        setStyle({
+                          ...style,
+                          backgroundColor: null,
+                          backgroundGradient: { ...style.backgroundGradient!, angle: Number(e.target.value) },
+                        })
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span className="badge">{(style.backgroundGradient.angle ?? 135).toFixed(0)}°</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -3314,6 +4395,123 @@ function ComponentFields(props: {
           </div>
         </div>
 
+        <div className="card">
+          <div className="cardTitle">CTA button</div>
+          <div className="stack">
+            <div className="field">
+              <label>Variant</label>
+              <select
+                data-testid="hero-cta-variant"
+                value={component.ctaStyle.variant ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    ctaStyle: {
+                      ...component.ctaStyle,
+                      variant: e.target.value === "" ? null : e.target.value === "outline" ? "outline" : "filled",
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                {BUTTON_VARIANTS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Background</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-bg"
+                  type="color"
+                  value={component.ctaStyle.bgColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, bgColor: e.target.value } })}
+                />
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, bgColor: null } })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Text</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-text"
+                  type="color"
+                  value={component.ctaStyle.textColor ?? "#ffffff"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, textColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, textColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Border</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-border"
+                  type="color"
+                  value={component.ctaStyle.borderColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, borderColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, borderColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Radius</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-radius"
+                  type="range"
+                  min={0}
+                  max={28}
+                  value={component.ctaStyle.radius ?? 10}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, radius: Number(e.target.value) } })}
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{component.ctaStyle.radius ?? 10}px</span>
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, radius: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <button
+              className="btn"
+              data-testid="hero-cta-clear"
+              disabled={!canEdit}
+              onClick={() =>
+                onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, variant: null, bgColor: null, textColor: null, borderColor: null, radius: null } })
+              }
+            >
+              Clear button styles
+            </button>
+          </div>
+        </div>
+
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
       </div>
     );
@@ -3330,7 +4528,9 @@ function ComponentFields(props: {
             disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, html: e.target.value })}
           />
-          <div className="muted">MVP: edit raw HTML. Next: true inline editing.</div>
+          <div className="muted">
+            Tip: use the inline editor in Preview (with the formatting toolbar). This textarea is for advanced raw HTML and is sanitized on save/export.
+          </div>
         </div>
 
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
@@ -3356,6 +4556,126 @@ function ComponentFields(props: {
             disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, submitLabel: e.target.value })}
           />
+        </div>
+
+        <div className="card">
+          <div className="cardTitle">Submit button</div>
+          <div className="stack">
+            <div className="field">
+              <label>Variant</label>
+              <select
+                data-testid="contact-submit-variant"
+                value={component.submitStyle.variant ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    submitStyle: {
+                      ...component.submitStyle,
+                      variant: e.target.value === "" ? null : e.target.value === "outline" ? "outline" : "filled",
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                {BUTTON_VARIANTS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Background</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-bg"
+                  type="color"
+                  value={component.submitStyle.bgColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, bgColor: e.target.value } })}
+                />
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, bgColor: null } })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Text</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-text"
+                  type="color"
+                  value={component.submitStyle.textColor ?? "#ffffff"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, textColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, textColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Border</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-border"
+                  type="color"
+                  value={component.submitStyle.borderColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, borderColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, borderColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Radius</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-radius"
+                  type="range"
+                  min={0}
+                  max={28}
+                  value={component.submitStyle.radius ?? 10}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, radius: Number(e.target.value) } })}
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{component.submitStyle.radius ?? 10}px</span>
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, radius: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <button
+              className="btn"
+              data-testid="contact-submit-clear"
+              disabled={!canEdit}
+              onClick={() =>
+                onUpdate({
+                  ...component,
+                  submitStyle: { ...component.submitStyle, variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
+                })
+              }
+            >
+              Clear button styles
+            </button>
+          </div>
         </div>
 
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}

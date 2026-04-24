@@ -28,12 +28,12 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [ ] Sections:
   - [x] Reorder via ↑/↓ and drag&drop in Structure.
-  - [ ] Drag sections directly in Preview (optional).
+  - [x] Drag sections directly in Preview (optional).
 - [ ] Components:
   - [x] Reorder within a section (Inspector + Preview).
   - [x] Move components across sections (Preview drop zones).
-  - [ ] Move components across sections via Structure list (optional).
-  - [ ] Insert indicators (drop marker line) + auto-scroll while dragging.
+  - [x] Move components across sections via Structure list (optional).
+  - [x] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
   - [ ] Shift/Cmd selection of multiple components.
@@ -43,19 +43,19 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [ ] Selection model:
   - [x] Click-to-select in Preview (highlight).
-  - [ ] Hover toolbars (edit / duplicate / move / delete).
-  - [ ] Inline rename section labels.
+  - [x] Hover toolbars (edit / duplicate / move / delete).
+  - [x] Inline rename section labels.
 - [ ] Inline editing:
   - [x] `hero` headline/subheadline inline.
   - [x] `contact_form` headline/submit inline.
   - [x] `rich_text` inline (contenteditable + sanitizer on blur).
   - [x] Inline CTA label edit (hero).
   - [x] Inline image caption edit.
-  - [ ] True rich-text toolbar (bold/italic/link/lists) + safe paste sanitization.
+  - [x] True rich-text toolbar (bold/italic/link/lists) + safe paste sanitization.
 
 ## Milestone 4 — Assets & Image Editing
 
-- [ ] Asset library:
+- [x] Asset library:
   - [x] Upload images + store in `projects/<id>/assets`.
   - [x] Edit alt text (stored in `page.json`).
   - [x] Replace an existing image asset file (keep same `asset.id`).
@@ -69,17 +69,17 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 5 — Visual Styling (pleasant, powerful)
 
-- [ ] Page-level theme:
-  - [ ] global typography scale + font choices
-  - [ ] color palette tokens (bg/text/accent)
-  - [ ] spacing scale
+- [x] Page-level theme:
+  - [x] global typography scale + font choices
+  - [x] color palette tokens (bg/text/accent)
+  - [x] spacing scale
 - [ ] Component styling UI:
-  - [ ] alignment, spacing, max-width
-  - [ ] background/gradient controls
-  - [ ] button style controls
-  - [ ] responsive preview breakpoints
-- [ ] Presets:
-  - [ ] “modern landing”, “minimal”, “editorial”, “playful” presets.
+  - [x] alignment, spacing, max-width
+  - [x] background/gradient controls
+  - [x] button style controls
+  - [x] responsive preview breakpoints
+- [x] Presets:
+  - [x] “modern landing”, “minimal”, “editorial”, “playful” presets.
 
 ## Milestone 6 — Agent (smart + safe + delightful)
 
@@ -95,9 +95,9 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Guard: no implicit deletions.
   - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.
   - [x] Guard: limit change magnitude unless user asks (diff budget).
-  - [ ] Prompt templates per component type.
+  - [x] Prompt templates per component type.
 - [ ] Tools:
-  - [ ] Agent can request a refreshed screenshot.
+  - [x] Agent can request a refreshed screenshot.
   - [ ] Agent can add images by generating prompts / placeholders (future).
 
 ## Milestone 7 — Export (static site quality)
@@ -116,8 +116,8 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] cross-section DnD move
   - [x] image replace
   - [x] image edit (styles + editor)
-  - [ ] style edits + export correctness
-  - [ ] agent run (skip if no key)
+  - [x] style edits + export correctness
+  - [x] agent run (skip if no key)
   - [x] screenshot capture (enable via `CAC_E2E_SCREENSHOT=1`)
 - [ ] ChromeDev MCP “manual script” checklist:
   - [ ] drag, edit, upload, screenshot, agent edit, export.

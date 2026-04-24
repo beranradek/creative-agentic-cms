@@ -110,6 +110,51 @@ describe("renderPageHtml", () => {
     expect(html).toContain("justify-self:center");
   });
 
+  it("renders gradients and button inline styles", () => {
+    const page = PageSchema.parse({
+      version: 1,
+      metadata: { title: "t", description: "", lang: "en" },
+      assets: [],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: { backgroundGradient: { from: "#111111", to: "#222222", angle: 90 } },
+          components: [
+            {
+              id: "c1",
+              type: "hero",
+              headline: "Hello",
+              subheadline: "World",
+              ctaStyle: { variant: "outline", textColor: "#ff0000", borderColor: "#00ff00", radius: 18 },
+              style: { backgroundGradient: { from: "#abcdef", to: "#123456", angle: 180 } },
+            },
+            {
+              id: "c2",
+              type: "contact_form",
+              headline: "Contact",
+              submitLabel: "Send",
+              submitStyle: { bgColor: "#0000ff", textColor: "#ffffff", radius: 6 },
+              style: {},
+            },
+          ],
+        },
+      ],
+    });
+
+    const { html } = renderPageHtml(page);
+    expect(html).toContain("background:linear-gradient(90deg, #111111, #222222)");
+    expect(html).toContain("background:linear-gradient(180deg, #abcdef, #123456)");
+    expect(html).toContain('class="cta"');
+    expect(html).toContain("background:transparent;");
+    expect(html).toContain("border-radius:18px;");
+    expect(html).toContain("color:#ff0000;");
+    expect(html).toContain("border-color:#00ff00;");
+    expect(html).toContain("background:#0000ff;");
+    expect(html).toContain("border-radius:6px;");
+  });
+
   it("sanitizes rich_text HTML (no scripts / handlers / javascript:)", () => {
     const page = PageSchema.parse({
       version: 1,
@@ -125,7 +170,7 @@ describe("renderPageHtml", () => {
             {
               id: "c1",
               type: "rich_text",
-              html: `<p onclick="alert(1)">Hello</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>`,
+              html: `<p onclick="alert(1)">Hello</p><script>alert(1)</script><a href="javascript:alert(1)">x</a><b>Bold</b><i>It</i><div>Line</div>`,
             },
           ],
         },
@@ -136,5 +181,8 @@ describe("renderPageHtml", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onclick=");
     expect(html).not.toContain("javascript:");
+    expect(html).toContain("<strong>Bold</strong>");
+    expect(html).toContain("<em>It</em>");
+    expect(html).toContain("<p>Line</p>");
   });
 });
