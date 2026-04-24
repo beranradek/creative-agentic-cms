@@ -33,7 +33,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Reorder within a section (Inspector + Preview).
   - [x] Move components across sections (Preview drop zones).
   - [ ] Move components across sections via Structure list (optional).
-  - [ ] Insert indicators (drop marker line) + auto-scroll while dragging.
+  - [x] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
   - [ ] Shift/Cmd selection of multiple components.
@@ -43,8 +43,8 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [ ] Selection model:
   - [x] Click-to-select in Preview (highlight).
-  - [ ] Hover toolbars (edit / duplicate / move / delete).
-  - [ ] Inline rename section labels.
+  - [x] Hover toolbars (edit / duplicate / move / delete).
+  - [x] Inline rename section labels.
 - [ ] Inline editing:
   - [x] `hero` headline/subheadline inline.
   - [x] `contact_form` headline/submit inline.
@@ -55,7 +55,7 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 4 — Assets & Image Editing
 
-- [ ] Asset library:
+- [x] Asset library:
   - [x] Upload images + store in `projects/<id>/assets`.
   - [x] Edit alt text (stored in `page.json`).
   - [x] Replace an existing image asset file (keep same `asset.id`).
@@ -116,7 +116,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] cross-section DnD move
   - [x] image replace
   - [x] image edit (styles + editor)
-  - [ ] style edits + export correctness
+  - [x] style edits + export correctness
   - [x] agent run (skip if no key)
   - [x] screenshot capture (enable via `CAC_E2E_SCREENSHOT=1`)
 - [ ] ChromeDev MCP “manual script” checklist:
