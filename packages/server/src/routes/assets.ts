@@ -4,7 +4,7 @@ import express from "express";
 import multer from "multer";
 import { z, type ZodType } from "zod";
 import imageSize from "image-size";
-import { ImageAssetSchema } from "@cac/shared";
+import { AssetIdSchema, ImageAssetSchema } from "@cac/shared";
 import type { ProjectStore } from "../project-store.js";
 
 interface CreateAssetRouterOptions {
@@ -76,7 +76,7 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
 
   router.post("/images/:assetId/replace", upload.single("file"), async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
-    const assetId = z.string().min(1).parse((req.params as { assetId?: string }).assetId);
+    const assetId = AssetIdSchema.parse((req.params as { assetId?: string }).assetId);
     const clientEtag = z.string().min(1).optional().parse(req.header("if-match"));
 
     const file = req.file;
