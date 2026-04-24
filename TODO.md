@@ -51,7 +51,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] `rich_text` inline (contenteditable + sanitizer on blur).
   - [x] Inline CTA label edit (hero).
   - [x] Inline image caption edit.
-  - [ ] True rich-text toolbar (bold/italic/link/lists) + safe paste sanitization.
+  - [x] True rich-text toolbar (bold/italic/link/lists) + safe paste sanitization.
 
 ## Milestone 4 — Assets & Image Editing
 
@@ -75,8 +75,8 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] spacing scale
 - [ ] Component styling UI:
   - [x] alignment, spacing, max-width
-  - [ ] background/gradient controls
-  - [ ] button style controls
+  - [x] background/gradient controls
+  - [x] button style controls
   - [x] responsive preview breakpoints
 - [x] Presets:
   - [x] “modern landing”, “minimal”, “editorial”, “playful” presets.

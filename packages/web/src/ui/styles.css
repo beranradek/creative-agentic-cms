@@ -654,6 +654,20 @@ body {
   cursor: text;
 }
 
+.richTextFormatBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px 0;
+  position: relative;
+  z-index: 3;
+}
+
+.richTextFormatBar .btn {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .sitePreviewRoot .imageBlock {
   border-radius: calc(var(--site-radius) - 4px);
   border: 1px solid rgba(15, 23, 42, 0.10);

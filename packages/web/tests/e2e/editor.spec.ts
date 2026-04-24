@@ -511,6 +511,40 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await expect(page.locator(".richText")).toContainText("Hello inline editor");
 });
 
+test("rich text formatting toolbar can bold selection and persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_rich_toolbar_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+
+  await page.locator('[data-testid="preview-item"][data-component-type="rich_text"]').click();
+  await expect(page.getByTestId("richtext-toolbar")).toBeVisible();
+
+  const editable = page.locator(".richTextEditable");
+  await editable.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("Hello world");
+
+  // Select "world" and apply bold.
+  await page.keyboard.press("Control+Shift+ArrowLeft");
+  await page.getByTestId("richtext-bold").click();
+
+  // Blur + persist.
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  const pageJson = (await fetchPageJson(page, projectId)) as {
+    sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+  };
+  const html = pageJson.sections[0]?.components[0]?.html ?? "";
+  expect(html).toContain("<strong>");
+  expect(html).toContain("world");
+});
+
 test("image can be replaced from Preview toolbar (uploads new asset)", async ({ page }) => {
   await page.goto("/");
 

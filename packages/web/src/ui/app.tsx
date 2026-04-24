@@ -209,6 +209,72 @@ function moveByIndexAllowEnd<T>(items: T[], fromIndex: number, toIndex: number):
   return copy;
 }
 
+function escapeHtmlText(input: string): string {
+  return input.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return ch;
+    }
+  });
+}
+
+function plainTextToRichTextHtml(text: string): string {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!normalized) return "";
+  const escaped = escapeHtmlText(normalized).replace(/\n/g, "<br>");
+  return `<p>${escaped}</p>`;
+}
+
+function sanitizeRichTextHref(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("#") || trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return trimmed;
+  if (trimmed.startsWith("mailto:")) return trimmed;
+  try {
+    const url = new URL(trimmed, window.location.href);
+    if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function insertRichTextLinkAtSelection(container: HTMLElement, href: string) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount < 1) return;
+  const range = selection.getRangeAt(0);
+  const ancestor =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+  if (!ancestor || !container.contains(ancestor)) return;
+
+  const selectedText = selection.toString().trim();
+  const link = document.createElement("a");
+  link.setAttribute("href", href);
+  link.textContent = selectedText.length ? selectedText : href;
+
+  range.deleteContents();
+  range.insertNode(link);
+
+  const nextRange = document.createRange();
+  nextRange.setStartAfter(link);
+  nextRange.setEndAfter(link);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+}
+
 function sanitizeRichTextHtml(inputHtml: string): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div>${inputHtml}</div>`, "text/html");
@@ -220,21 +286,6 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
   const allowedTags = new Set(["p", "br", "strong", "em", "a", "ul", "ol", "li"]);
 
-  function sanitizeHref(raw: string | null): string | null {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    if (trimmed.startsWith("#") || trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) return trimmed;
-    if (trimmed.startsWith("mailto:")) return trimmed;
-    try {
-      const url = new URL(trimmed, window.location.href);
-      if (url.protocol === "http:" || url.protocol === "https:") return url.href;
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
   function appendSanitized(parent: HTMLElement, node: Node) {
     if (node.nodeType === Node.TEXT_NODE) {
       parent.appendChild(outDoc.createTextNode(node.textContent ?? ""));
@@ -243,7 +294,8 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
-    const tag = el.tagName.toLowerCase();
+    const rawTag = el.tagName.toLowerCase();
+    const tag = rawTag === "b" ? "strong" : rawTag === "i" ? "em" : rawTag === "div" ? "p" : rawTag;
 
     if (!allowedTags.has(tag)) {
       for (const child of Array.from(el.childNodes)) appendSanitized(parent, child);
@@ -252,7 +304,7 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 
     const outEl = outDoc.createElement(tag);
     if (tag === "a") {
-      const href = sanitizeHref(el.getAttribute("href"));
+      const href = sanitizeRichTextHref(el.getAttribute("href"));
       if (href) outEl.setAttribute("href", href);
       const target = el.getAttribute("target");
       if (target === "_blank") {
@@ -3041,6 +3093,7 @@ function PreviewComponent(props: {
   } = props;
   const [isHovering, setIsHovering] = useState(false);
   const [dropHint, setDropHint] = useState<{ isOver: boolean; position: DropPosition }>({ isOver: false, position: "before" });
+  const richTextRef = useRef<HTMLDivElement | null>(null);
   const showToolbar = (isSelected || isHovering) && canEdit;
 
   const wrapperClass = [
@@ -3188,6 +3241,14 @@ function PreviewComponent(props: {
     const innerStyle = computeBoxInnerStyle(component.style);
     const safeHtml = sanitizeRichTextHtml(component.html);
     if (isSelected && canEdit) {
+      const runCommand = (command: string) => {
+        richTextRef.current?.focus();
+        try {
+          document.execCommand(command);
+        } catch {
+          // ignore
+        }
+      };
       return (
         <div
           className={wrapperClass}
@@ -3208,13 +3269,106 @@ function PreviewComponent(props: {
               </button>
             </div>
           ) : null}
+          <div className="richTextFormatBar" data-testid="richtext-toolbar" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="btn"
+              data-testid="richtext-bold"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("bold");
+              }}
+            >
+              Bold
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-italic"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("italic");
+              }}
+            >
+              Italic
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-link"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const raw = window.prompt("Enter link URL (https://, mailto:, #anchor, /path)");
+                const href = sanitizeRichTextHref(raw);
+                if (!href) return;
+                const container = richTextRef.current;
+                if (!container) return;
+                container.focus();
+                insertRichTextLinkAtSelection(container, href);
+              }}
+            >
+              Link
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-ul"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("insertUnorderedList");
+              }}
+            >
+              • List
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-ol"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("insertOrderedList");
+              }}
+            >
+              1. List
+            </button>
+            <button
+              className="btn"
+              data-testid="richtext-clear"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runCommand("removeFormat");
+                runCommand("unlink");
+              }}
+            >
+              Clear
+            </button>
+          </div>
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
             style={innerStyle}
+            ref={richTextRef}
             contentEditable
             suppressContentEditableWarning
             onClick={(e) => e.stopPropagation()}
+            onPaste={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const rawHtml = e.clipboardData.getData("text/html");
+              const rawText = e.clipboardData.getData("text/plain");
+              const raw = rawHtml && rawHtml.trim().length ? rawHtml : plainTextToRichTextHtml(rawText);
+              const clean = sanitizeRichTextHtml(raw);
+              const container = richTextRef.current;
+              if (!container) return;
+              container.focus();
+              try {
+                document.execCommand("insertHTML", false, clean);
+              } catch {
+                // Fallback: append at end.
+                container.innerHTML = sanitizeRichTextHtml(`${container.innerHTML}${clean}`);
+              }
+            }}
             onBlur={(e) => {
               const raw = e.currentTarget.innerHTML;
               const clean = sanitizeRichTextHtml(raw);
