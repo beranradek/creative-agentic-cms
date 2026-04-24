@@ -15,6 +15,34 @@ export const PageMetadataSchema = z.object({
   lang: z.string().default("en"),
 });
 
+export const THEME_PRESETS = ["modern", "minimal", "editorial", "playful"] as const;
+const ThemePresetSchema = z
+  .union([z.literal("modern"), z.literal("minimal"), z.literal("editorial"), z.literal("playful")])
+  .nullable()
+  .default(null);
+
+const FontFamilySchema = z.string().min(1).nullable().default(null);
+const HexColorSchema = z
+  .string()
+  .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
+  .nullable()
+  .default(null);
+
+export const PageThemeSchema = z
+  .object({
+    preset: ThemePresetSchema,
+    fontFamily: FontFamilySchema,
+    baseFontSize: z.number().int().min(12).max(22).nullable().default(null),
+    lineHeight: z.number().min(1.1).max(1.8).nullable().default(null),
+    bgColor: HexColorSchema,
+    textColor: HexColorSchema,
+    mutedTextColor: HexColorSchema,
+    accentColor: HexColorSchema,
+    spaceBase: z.number().int().min(4).max(14).nullable().default(null),
+    radius: z.number().int().min(0).max(28).nullable().default(null),
+  })
+  .default({});
+
 export const ImageAssetSchema = z.object({
   id: AssetIdSchema,
   type: z.literal("image"),
@@ -153,6 +181,7 @@ export const SectionSchema = z.object({
 export const PageSchema = z.object({
   version: z.literal(1),
   metadata: PageMetadataSchema.default({}),
+  theme: PageThemeSchema,
   sections: z.array(SectionSchema).default([]),
   assets: z.array(AssetSchema).default([]),
 });

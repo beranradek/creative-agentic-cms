@@ -28,11 +28,11 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [ ] Sections:
   - [x] Reorder via ↑/↓ and drag&drop in Structure.
-  - [ ] Drag sections directly in Preview (optional).
+  - [x] Drag sections directly in Preview (optional).
 - [ ] Components:
   - [x] Reorder within a section (Inspector + Preview).
   - [x] Move components across sections (Preview drop zones).
-  - [ ] Move components across sections via Structure list (optional).
+  - [x] Move components across sections via Structure list (optional).
   - [x] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
@@ -69,17 +69,17 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 5 — Visual Styling (pleasant, powerful)
 
-- [ ] Page-level theme:
-  - [ ] global typography scale + font choices
-  - [ ] color palette tokens (bg/text/accent)
-  - [ ] spacing scale
+- [x] Page-level theme:
+  - [x] global typography scale + font choices
+  - [x] color palette tokens (bg/text/accent)
+  - [x] spacing scale
 - [ ] Component styling UI:
-  - [ ] alignment, spacing, max-width
+  - [x] alignment, spacing, max-width
   - [ ] background/gradient controls
   - [ ] button style controls
-  - [ ] responsive preview breakpoints
-- [ ] Presets:
-  - [ ] “modern landing”, “minimal”, “editorial”, “playful” presets.
+  - [x] responsive preview breakpoints
+- [x] Presets:
+  - [x] “modern landing”, “minimal”, “editorial”, “playful” presets.
 
 ## Milestone 6 — Agent (smart + safe + delightful)
 

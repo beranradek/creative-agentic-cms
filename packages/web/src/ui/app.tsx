@@ -7,7 +7,10 @@ import {
   SECTION_GRID_COLUMNS,
   SECTION_LAYOUTS,
   SECTION_MAX_WIDTHS,
+  THEME_PRESETS,
   TEXT_ALIGNS,
+  resolveTheme,
+  resolvedThemeToCssVars,
   type Asset,
   type Component,
   type Page,
@@ -141,6 +144,19 @@ function moveInArray<T>(items: T[], fromIndex: number, toIndex: number): T[] {
   const [item] = copy.splice(fromIndex, 1);
   if (item === undefined) return items;
   copy.splice(toIndex, 0, item);
+  return copy;
+}
+
+function moveByIndexAllowEnd<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  if (fromIndex < 0 || fromIndex >= items.length) return items;
+  if (toIndex < 0 || toIndex > items.length) return items;
+  const copy = items.slice();
+  const [item] = copy.splice(fromIndex, 1);
+  if (item === undefined) return items;
+  const adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+  const clamped = Math.max(0, Math.min(copy.length, adjustedIndex));
+  if (clamped === fromIndex) return items;
+  copy.splice(clamped, 0, item);
   return copy;
 }
 
@@ -666,6 +682,10 @@ export function App() {
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+  const [dragOverComponentSectionId, setDragOverComponentSectionId] = useState<string | null>(null);
+  const [previewSectionDropHint, setPreviewSectionDropHint] = useState<{ sectionId: string; position: DropPosition } | null>(
+    null
+  );
   const [editingSectionLabelId, setEditingSectionLabelId] = useState<string | null>(null);
   const [editingSectionLabelValue, setEditingSectionLabelValue] = useState("");
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
@@ -683,6 +703,7 @@ export function App() {
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
+  const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [sttLang, setSttLang] = useState(() => {
@@ -718,6 +739,9 @@ export function App() {
   const latestPageJsonRef = useRef<string | null>(null);
   const page = state.kind === "ready" ? state.editor.page : null;
   const pageJson = useMemo(() => (page ? JSON.stringify(page) : null), [page]);
+  const resolvedSiteTheme = useMemo(() => resolveTheme(page?.theme ?? null), [page?.theme]);
+  const siteCssVars = useMemo(() => resolvedThemeToCssVars(resolvedSiteTheme), [resolvedSiteTheme]);
+  const siteCssVarStyle = useMemo(() => siteCssVars as unknown as React.CSSProperties, [siteCssVars]);
   const isDirty = pageJson !== null && lastSavedJsonRef.current !== pageJson;
   const canEdit = state.kind === "ready" && loadedProjectId === projectId;
   const activeProjectId = loadedProjectId;
@@ -2036,40 +2060,142 @@ export function App() {
       <div className="panel">
         <div className="panelHeader">
           <h2>Preview</h2>
-          <span className="badge">{page ? `${page.sections.length} sections` : "…"}</span>
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <select
+              aria-label="Preview viewport"
+              data-testid="preview-viewport"
+              value={previewDeviceWidth === null ? "auto" : String(previewDeviceWidth)}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "auto") {
+                  setPreviewDeviceWidth(null);
+                  return;
+                }
+                const n = Number(v);
+                setPreviewDeviceWidth(Number.isFinite(n) && n > 0 ? n : null);
+              }}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: "1px solid var(--line)",
+                background: "rgba(255,255,255,0.85)",
+                color: "var(--text)",
+              }}
+            >
+              <option value="auto">auto</option>
+              <option value="375">mobile (375)</option>
+              <option value="768">tablet (768)</option>
+              <option value="1024">desktop (1024)</option>
+            </select>
+            <span className="badge">{page ? `${page.sections.length} sections` : "…"}</span>
+          </div>
         </div>
         <div className="panelBody">
           <div className="canvas">
+            <div className="previewViewport" style={previewDeviceWidth ? { maxWidth: previewDeviceWidth, margin: "0 auto" } : undefined}>
             <div className="preview">
               {page ? (
-                <div className="stack" style={{ gap: 18 }}>
+                <div className="sitePreviewRoot" style={siteCssVarStyle}>
+                <div className="stack" style={{ gap: "var(--site-space-3)" }}>
                   {page.sections
                     .filter((section) => section.settings.visible)
-                    .map((section) => (
-                  <div
-                    key={section.id}
-                    className="previewSection"
-                    data-testid="preview-section"
-                    data-section-id={section.id}
-                    style={{
-                      background: section.style.background ?? undefined,
-                      padding: section.style.padding !== null ? section.style.padding : undefined,
-                      maxWidth: section.style.maxWidth ?? 980,
-                    }}
-                  >
-                    <div
-                      data-testid="preview-section-inner"
-                      style={{
-                        gap: section.settings.gap ?? 12,
-                        display: section.settings.layout === "grid" ? "grid" : "flex",
-                        gridTemplateColumns:
-                          section.settings.layout === "grid"
-                            ? `repeat(${section.settings.gridColumns ?? 2}, minmax(0, 1fr))`
-                            : undefined,
-                        alignItems: section.settings.layout === "grid" ? "start" : undefined,
-                        flexDirection: section.settings.layout === "grid" ? undefined : "column",
-                      }}
-                    >
+                    .map((section) => {
+                      const hintPos =
+                        previewSectionDropHint && previewSectionDropHint.sectionId === section.id ? previewSectionDropHint.position : null;
+                      return (
+                        <div
+                          key={section.id}
+                          className={
+                            hintPos
+                              ? hintPos === "before"
+                                ? "previewSectionWrap previewSectionWrapDropBefore"
+                                : "previewSectionWrap previewSectionWrapDropAfter"
+                              : "previewSectionWrap"
+                          }
+                          data-testid="preview-section-wrap"
+                          data-section-id={section.id}
+                          onDragOver={(e) => {
+                            if (!canEdit) return;
+                            const payload = getDragPayload(e);
+                            if (!payload || payload.kind !== "section") return;
+                            e.preventDefault();
+                            autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const position = computeDropPosition(rect, e.clientY);
+                            setPreviewSectionDropHint((prev) =>
+                              prev && prev.sectionId === section.id && prev.position === position ? prev : { sectionId: section.id, position }
+                            );
+                          }}
+                          onDragLeave={(e) => {
+                            const related = e.relatedTarget;
+                            if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                            setPreviewSectionDropHint((prev) => (prev?.sectionId === section.id ? null : prev));
+                          }}
+                          onDrop={(e) => {
+                            if (!canEdit) return;
+                            const payload = getDragPayload(e);
+                            if (!payload || payload.kind !== "section") return;
+                            e.preventDefault();
+                            clearDragPayload();
+                            setPreviewSectionDropHint(null);
+                            if (payload.sectionId === section.id) return;
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const position = computeDropPosition(rect, e.clientY);
+                            updatePage((prev) => {
+                              const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
+                              const targetIndex = prev.sections.findIndex((s) => s.id === section.id);
+                              if (fromIndex < 0 || targetIndex < 0) return prev;
+                              const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
+                              return PageSchema.parse({ ...prev, sections: moveByIndexAllowEnd(prev.sections, fromIndex, toIndex) });
+                            });
+                          }}
+                        >
+                          {canEdit ? (
+                            <div
+                              className="previewSectionHandle"
+                              data-testid="preview-section-handle"
+                              data-section-id={section.id}
+                              draggable
+                              onDragStart={(e) => {
+                                setDragPayload(e, { kind: "section", sectionId: section.id });
+                              }}
+                              onDragEnd={() => {
+                                setTimeout(() => clearDragPayload(), 0);
+                                setPreviewSectionDropHint(null);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelected({ sectionId: section.id });
+                              }}
+                              title="Drag section"
+                            >
+                              ⋮⋮
+                            </div>
+                          ) : null}
+
+                          <div
+                            className="previewSection"
+                            data-testid="preview-section"
+                            data-section-id={section.id}
+                            style={{
+                              background: section.style.background ?? undefined,
+                              padding: section.style.padding !== null ? section.style.padding : undefined,
+                              maxWidth: section.style.maxWidth ?? 980,
+                            }}
+                          >
+                            <div
+                              data-testid="preview-section-inner"
+                              style={{
+                                gap: section.settings.gap ?? 12,
+                                display: section.settings.layout === "grid" ? "grid" : "flex",
+                                gridTemplateColumns:
+                                  section.settings.layout === "grid"
+                                    ? `repeat(${section.settings.gridColumns ?? 2}, minmax(0, 1fr))`
+                                    : undefined,
+                                alignItems: section.settings.layout === "grid" ? "start" : undefined,
+                                flexDirection: section.settings.layout === "grid" ? undefined : "column",
+                              }}
+                            >
                       {section.components.map((component) => (
                         <PreviewComponent
                           key={component.id}
@@ -2172,12 +2298,16 @@ export function App() {
                           }}
                         />
                       </div>
-                  </div>
-                  ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
                 </div>
               ) : (
                 <div className="muted">Loading…</div>
               )}
+            </div>
             </div>
           </div>
         </div>
@@ -2222,6 +2352,269 @@ export function App() {
                 </div>
               </div>
 
+              <div className="card">
+                <div className="cardTitle">Theme</div>
+                <div className="stack">
+                  <div className="field">
+                    <label>Preset</label>
+                    <select
+                      data-testid="theme-preset"
+                      value={page.theme.preset ?? ""}
+                      disabled={!canEdit}
+                      onChange={(e) => {
+                        const nextPreset = e.target.value ? (e.target.value as (typeof THEME_PRESETS)[number]) : null;
+                        updatePage((prev) =>
+                          PageSchema.parse({
+                            ...prev,
+                            theme: {
+                              preset: nextPreset,
+                              fontFamily: null,
+                              baseFontSize: null,
+                              lineHeight: null,
+                              bgColor: null,
+                              textColor: null,
+                              mutedTextColor: null,
+                              accentColor: null,
+                              spaceBase: null,
+                              radius: null,
+                            },
+                          })
+                        );
+                      }}
+                    >
+                      <option value="">(default)</option>
+                      {THEME_PRESETS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Background</label>
+                      <input
+                        type="color"
+                        data-testid="theme-bg"
+                        value={page.theme.bgColor ?? resolvedSiteTheme.bgColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() => updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: null } }))}
+                        disabled={!canEdit || page.theme.bgColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Text</label>
+                      <input
+                        type="color"
+                        value={page.theme.textColor ?? resolvedSiteTheme.textColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: null } }))
+                        }
+                        disabled={!canEdit || page.theme.textColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Muted</label>
+                      <input
+                        type="color"
+                        value={page.theme.mutedTextColor ?? resolvedSiteTheme.mutedTextColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: null } })
+                          )
+                        }
+                        disabled={!canEdit || page.theme.mutedTextColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 160 }}>
+                      <label>Accent</label>
+                      <input
+                        type="color"
+                        data-testid="theme-accent"
+                        value={page.theme.accentColor ?? resolvedSiteTheme.accentColor}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: e.target.value } })
+                          )
+                        }
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: null } }))
+                        }
+                        disabled={!canEdit || page.theme.accentColor === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+                    <div className="field" style={{ width: 220 }}>
+                      <label>Font family (CSS)</label>
+                      <input
+                        value={page.theme.fontFamily ?? ""}
+                        placeholder="(auto)"
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          updatePage((prev) =>
+                            PageSchema.parse({ ...prev, theme: { ...prev.theme, fontFamily: raw ? raw : null } })
+                          );
+                        }}
+                      />
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Base size</label>
+                      <input
+                        inputMode="numeric"
+                        data-testid="theme-base-font"
+                        value={String(page.theme.baseFontSize ?? resolvedSiteTheme.baseFontSize)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(12, Math.min(22, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, baseFontSize: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, baseFontSize: null } }))
+                        }
+                        disabled={!canEdit || page.theme.baseFontSize === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Line height</label>
+                      <input
+                        value={String(page.theme.lineHeight ?? resolvedSiteTheme.lineHeight)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(1.1, Math.min(1.8, n)) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, lineHeight: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, lineHeight: null } }))
+                        }
+                        disabled={!canEdit || page.theme.lineHeight === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Spacing</label>
+                      <input
+                        inputMode="numeric"
+                        value={String(page.theme.spaceBase ?? resolvedSiteTheme.spaceBase)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(4, Math.min(14, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, spaceBase: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, spaceBase: null } }))
+                        }
+                        disabled={!canEdit || page.theme.spaceBase === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <div className="field" style={{ width: 140 }}>
+                      <label>Radius</label>
+                      <input
+                        inputMode="numeric"
+                        value={String(page.theme.radius ?? resolvedSiteTheme.radius)}
+                        disabled={!canEdit}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const n = raw ? Number(raw) : NaN;
+                          const clamped = Number.isFinite(n) ? Math.max(0, Math.min(28, Math.round(n))) : null;
+                          updatePage((prev) =>
+                            PageSchema.parse({
+                              ...prev,
+                              theme: { ...prev.theme, radius: clamped },
+                            })
+                          );
+                        }}
+                      />
+                      <button
+                        className="btn"
+                        onClick={() =>
+                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, radius: null } }))
+                        }
+                        disabled={!canEdit || page.theme.radius === null}
+                      >
+                        Auto
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="list">
                 {page.sections.map((section, idx) => (
                   <div
@@ -2229,28 +2622,28 @@ export function App() {
                     className="card"
                     data-testid="structure-section-card"
                     data-section-id={section.id}
-                    draggable={canEdit && editingSectionLabelId !== section.id}
-                    onDragStart={(e) => {
-                      if (!canEdit) return;
-                      if (editingSectionLabelId === section.id) return;
-                      setDragPayload(e, { kind: "section", sectionId: section.id });
-                    }}
-                    onDragEnd={() => clearDragPayload()}
-                    onDragOver={(e) => {
+                    onDragOverCapture={(e) => {
                       if (!canEdit) return;
                       const payload = getDragPayload(e);
-                      if (!payload || payload.kind !== "section") return;
-                      e.preventDefault();
-                      setDragOverSectionId(section.id);
+                      if (!payload) return;
+                      if (payload.kind === "section") {
+                        e.preventDefault();
+                        setDragOverSectionId(section.id);
+                      }
                     }}
-                    onDragLeave={() => setDragOverSectionId((prev) => (prev === section.id ? null : prev))}
-                    onDrop={(e) => {
+                    onDragLeave={(e) => {
+                      const related = e.relatedTarget;
+                      if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                      setDragOverSectionId((prev) => (prev === section.id ? null : prev));
+                    }}
+                    onDropCapture={(e) => {
                       if (!canEdit) return;
                       const payload = getDragPayload(e);
                       if (!payload || payload.kind !== "section") return;
                       e.preventDefault();
                       clearDragPayload();
                       setDragOverSectionId(null);
+
                       if (payload.sectionId === section.id) return;
                       updatePage((prev) => {
                         const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
@@ -2266,6 +2659,23 @@ export function App() {
                   >
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="row" style={{ gap: 10 }}>
+                        {canEdit ? (
+                          <span
+                            className="dragHandle"
+                            data-testid="structure-section-drag-handle"
+                            draggable={canEdit && editingSectionLabelId !== section.id}
+                            title="Drag to reorder section"
+                            onDragStart={(e) => {
+                              if (!canEdit) return;
+                              if (editingSectionLabelId === section.id) return;
+                              setDragPayload(e, { kind: "section", sectionId: section.id });
+                            }}
+                            onDragEnd={() => setTimeout(() => clearDragPayload(), 0)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            ⋮⋮
+                          </span>
+                        ) : null}
                         {editingSectionLabelId === section.id && canEdit ? (
                           <input
                             data-testid="section-label-input"
@@ -2325,6 +2735,36 @@ export function App() {
                         >
                           ↓
                         </button>
+                        {selected?.componentId ? (
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              if (!canEdit) return;
+                              const fromComponentId = selected?.componentId;
+                              if (!fromComponentId) return;
+                              updatePage((prev) => {
+                                const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
+                                const toSection = prev.sections.find((s) => s.id === section.id);
+                                if (!fromSection || !toSection) return prev;
+                                const actualFromSectionId = fromSection.id;
+                                const nextSections = moveComponentByIndex({
+                                  sections: prev.sections,
+                                  fromSectionId: actualFromSectionId,
+                                  fromComponentId,
+                                  toSectionId: section.id,
+                                  toIndex: toSection.components.length,
+                                });
+                                return PageSchema.parse({ ...prev, sections: nextSections });
+                              });
+
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            }}
+                            disabled={!canEdit}
+                            title="Move selected component to this section"
+                          >
+                            Move here
+                          </button>
+                        ) : null}
                         <button className="btn btnDanger" onClick={() => removeSection(section.id)} disabled={!canEdit}>
                           Remove
                         </button>
@@ -2334,6 +2774,109 @@ export function App() {
                       </div>
                     </div>
                     <div className="muted">{section.components.length} components</div>
+                    <div
+                      className="structureComponentDropZone"
+                      data-testid="structure-component-dropzone"
+                      data-section-id={section.id}
+                      style={
+                        dragOverComponentSectionId === section.id
+                          ? { borderColor: "rgba(37, 99, 235, 0.6)", background: "rgba(37, 99, 235, 0.08)" }
+                          : undefined
+                      }
+                      onDragOverCapture={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragEnterCapture={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragOver={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragEnter={(e) => {
+                        if (!canEdit) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        setDragOverComponentSectionId(section.id);
+                      }}
+                      onDragLeave={(e) => {
+                        const related = e.relatedTarget;
+                        if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+                        setDragOverComponentSectionId((prev) => (prev === section.id ? null : prev));
+                      }}
+                      onDropCapture={(e) => {
+                        if (!canEdit) return;
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearDragPayload();
+                        setDragOverComponentSectionId(null);
+                        updatePage((prev) => {
+                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+                          const toSection = prev.sections.find((s) => s.id === section.id);
+                          if (!fromSection || !toSection) return prev;
+                          const actualFromSectionId = fromSection.id;
+                          const nextSections = moveComponentByIndex({
+                            sections: prev.sections,
+                            fromSectionId: actualFromSectionId,
+                            fromComponentId: payload.componentId,
+                            toSectionId: section.id,
+                            toIndex: toSection.components.length,
+                          });
+                          return PageSchema.parse({ ...prev, sections: nextSections });
+                        });
+
+                        setSelected((prevSel) =>
+                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
+                        );
+                      }}
+                      onDrop={(e) => {
+                        if (!canEdit) return;
+                        const payload = getDragPayload(e);
+                        if (!payload || payload.kind !== "component") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearDragPayload();
+                        setDragOverComponentSectionId(null);
+                        updatePage((prev) => {
+                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+                          const toSection = prev.sections.find((s) => s.id === section.id);
+                          if (!fromSection || !toSection) return prev;
+                          const actualFromSectionId = fromSection.id;
+                          const nextSections = moveComponentByIndex({
+                            sections: prev.sections,
+                            fromSectionId: actualFromSectionId,
+                            fromComponentId: payload.componentId,
+                            toSectionId: section.id,
+                            toIndex: toSection.components.length,
+                          });
+                          return PageSchema.parse({ ...prev, sections: nextSections });
+                        });
+
+                        setSelected((prevSel) =>
+                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
+                        );
+                      }}
+                    >
+                      Drop component here
+                    </div>
                   </div>
                 ))}
               </div>
@@ -3197,6 +3740,16 @@ function Inspector(props: {
               data-testid="inspector-component-row"
               data-component-id={c.id}
               data-component-type={c.type}
+              draggable={canEdit}
+              onDragStart={(e) => {
+                if (!canEdit) return;
+                setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
+              }}
+              onDragEnd={() => {
+                // In some browsers/automation harnesses, `drop` can race with `dragend`.
+                // Defer clearing so drop handlers can still read the in-memory payload if needed.
+                setTimeout(() => clearDragPayload(), 50);
+              }}
               style={
                 dragOverComponentId === c.id
                   ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
@@ -3237,7 +3790,11 @@ function Inspector(props: {
                     if (!canEdit) return;
                     setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
                   }}
-                  onDragEnd={() => clearDragPayload()}
+                  onDragEnd={() => {
+                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
+                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
+                    setTimeout(() => clearDragPayload(), 50);
+                  }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮

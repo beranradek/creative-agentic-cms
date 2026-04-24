@@ -5,6 +5,7 @@ describe("PageSchema", () => {
   it("parses minimal page with defaults", () => {
     const parsed = PageSchema.parse({ version: 1 });
     expect(parsed.metadata.title).toBeTruthy();
+    expect(parsed.theme.preset).toBeNull();
     expect(parsed.sections).toEqual([]);
     expect(parsed.assets).toEqual([]);
   });

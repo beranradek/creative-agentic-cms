@@ -133,8 +133,10 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   const cards = page.getByTestId("structure-section-card");
   await expect(cards).toHaveCount(2);
 
-  // Swap order: move first card onto second.
-  await cards.nth(0).dragTo(cards.nth(1));
+  // Swap order: drag first section handle onto second.
+  const handles = page.getByTestId("structure-section-drag-handle");
+  await expect(handles).toHaveCount(2);
+  await handles.nth(0).dragTo(cards.nth(1));
 
   const types = await page.getByTestId("preview-item").evaluateAll((els) =>
     els.map((el) => el.getAttribute("data-component-type"))
@@ -152,6 +154,33 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   );
   expect(typesAfter[0]).toBe("rich_text");
   expect(typesAfter[1]).toBe("hero");
+});
+
+test("sections can be reordered via drag and drop in Preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_section_dnd_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const handles = page.getByTestId("preview-section-handle");
+  const wraps = page.getByTestId("preview-section-wrap");
+  await expect(handles).toHaveCount(2);
+  await expect(wraps).toHaveCount(2);
+
+  // Move first section after the second by dropping to the bottom half of the target.
+  const targetBox = await wraps.nth(1).boundingBox();
+  if (!targetBox) throw new Error("Missing section target bounding box");
+  await handles.nth(0).dragTo(wraps.nth(1), { targetPosition: { x: Math.max(2, Math.floor(targetBox.width / 2)), y: Math.max(2, Math.floor(targetBox.height - 2)) } });
+
+  const types = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types[0]).toBe("rich_text");
+  expect(types[1]).toBe("hero");
 });
 
 test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
@@ -201,6 +230,27 @@ test("selection follows component when moved across sections in Preview", async 
 
   await expect(page.locator(".previewItemSelected")).toHaveCount(1);
   await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
+});
+
+test("components can be moved across sections via Structure list drop", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_structure_cross_section_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const cards = page.getByTestId("structure-section-card");
+  await expect(cards).toHaveCount(2);
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await hero.click();
+  await cards.nth(1).getByRole("button", { name: "Move here" }).click();
+
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("2 components");
 });
 
 test("components can be reordered via drag and drop within a section (Inspector list)", async ({ page }) => {
@@ -593,6 +643,32 @@ test("image style (radius + max width) persists", async ({ page }) => {
   expect(maxWidthAfter).toBe("480px");
   const radiusAfter = await page.locator(".imageBlock img").first().evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
   expect(radiusAfter).toBe("20px");
+});
+
+test("page theme affects Preview and export CSS vars", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_theme_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  // Change accent color and verify Preview reflects it.
+  await page.getByTestId("theme-accent").fill("#ff0000");
+  const cta = page.locator(".cta").first();
+  const bg = await cta.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toBe("rgb(255, 0, 0)");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("export-site").click();
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const cssRes = await page.request.get(`/projects/${projectId}/output/styles.css`);
+  expect(cssRes.ok()).toBeTruthy();
+  const css = await cssRes.text();
+  expect(css).toContain("--site-accent:#ff0000;");
 });
 
 test("exported HTML includes section + image styles", async ({ page }) => {
