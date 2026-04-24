@@ -1,8 +1,13 @@
 import { z } from "zod";
 
-export const AssetIdSchema = z.string().min(1);
-export const ComponentIdSchema = z.string().min(1);
-export const SectionIdSchema = z.string().min(1);
+const IdSchema = z
+  .string()
+  .min(1)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/, "Invalid id format");
+
+export const AssetIdSchema = IdSchema;
+export const ComponentIdSchema = IdSchema;
+export const SectionIdSchema = IdSchema;
 
 export const PageMetadataSchema = z.object({
   title: z.string().min(1).default("Untitled Page"),

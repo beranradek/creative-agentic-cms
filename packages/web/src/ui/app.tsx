@@ -1862,7 +1862,7 @@ export function App() {
                               {imageAssets.map((asset) => (
                                 <div key={asset.id} className="row" style={{ alignItems: "flex-start" }}>
                                   <img
-                                    src={`/projects/${encodeURIComponent(activeProjectId)}/assets/${asset.filename}`}
+                                    src={`/projects/${encodeURIComponent(activeProjectId)}/assets/${encodeURIComponent(asset.filename)}`}
                                     alt={asset.alt}
                                     style={{
                                       width: 44,
@@ -2653,7 +2653,7 @@ function PreviewComponent(props: {
         <div className="imageBlock" style={{ ...blockStyle, pointerEvents: isSelected ? "auto" : "none" }}>
           <div className="imageMedia">
             <img
-              src={`/projects/${encodeURIComponent(projectId)}/assets/${asset.filename}`}
+              src={`/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.filename)}`}
               alt={asset.alt}
               style={imgStyle}
               onClick={(e) => {

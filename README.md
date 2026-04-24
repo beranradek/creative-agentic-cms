@@ -141,6 +141,8 @@ cp .env.example .env
 Notes:
 - `.env` is gitignored (do not commit secrets).
 - `OPENAI_API_KEY` is required when `MODEL` points to an OpenAI model (for the agent features).
+- `HOST` controls where the API server binds (default `127.0.0.1`).
+- `CORS_ORIGINS` is a comma-separated allowlist for the web UI origin(s) (use `*` to allow all origins).
 
 ### Running Tests
 

@@ -22,7 +22,23 @@ const dataDirAbs = path.resolve(projectRoot, config.DATA_DIR);
 const store = new ProjectStore(dataDirAbs);
 const app = express();
 
-app.use(cors({ exposedHeaders: ["ETag"] }));
+const allowedOrigins = new Set(
+  config.CORS_ORIGINS.split(",")
+    .map((v) => v.trim())
+    .filter(Boolean)
+);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.has("*")) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    exposedHeaders: ["ETag"],
+  })
+);
 app.use(express.json({ limit: "5mb" }));
 
 const ProjectIdSchema = z
@@ -102,6 +118,6 @@ app.use("/api/projects/:projectId/preview", createPreviewRouter({ store, project
 
 app.use("/projects", express.static(dataDirAbs, { fallthrough: true }));
 
-app.listen(config.PORT, () => {
-  console.log(`[server] listening on http://localhost:${config.PORT}`);
+app.listen(config.PORT, config.HOST, () => {
+  console.log(`[server] listening on http://${config.HOST}:${config.PORT}`);
 });
