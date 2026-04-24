@@ -16,6 +16,7 @@ function renderBoxStyle(style: {
   maxWidth: 480 | 720 | 980 | null;
   padding: number | null;
   backgroundColor: string | null;
+  backgroundGradient?: { from: string | null; to: string | null; angle: number | null } | null;
 }): string {
   const styles: string[] = [];
 
@@ -29,7 +30,14 @@ function renderBoxStyle(style: {
 
   if (style.textAlign !== null) styles.push(`text-align:${escapeHtml(style.textAlign)};`);
   if (style.padding !== null) styles.push(`padding:${style.padding}px;`);
-  if (style.backgroundColor !== null) styles.push(`background-color:${escapeHtml(style.backgroundColor)};`);
+  const gradientFrom = style.backgroundGradient?.from ?? null;
+  const gradientTo = style.backgroundGradient?.to ?? null;
+  if (gradientFrom && gradientTo) {
+    const angle = style.backgroundGradient?.angle ?? 135;
+    styles.push(`background:linear-gradient(${angle}deg, ${escapeHtml(gradientFrom)}, ${escapeHtml(gradientTo)});`);
+  } else if (style.backgroundColor !== null) {
+    styles.push(`background-color:${escapeHtml(style.backgroundColor)};`);
+  }
 
   return styles.join("");
 }
@@ -38,6 +46,32 @@ function renderButtonJustify(textAlign: "left" | "center" | "right" | null): str
   if (textAlign === "center") return "center";
   if (textAlign === "right") return "end";
   return "start";
+}
+
+function renderButtonStyle(style: {
+  variant: "filled" | "outline" | null;
+  bgColor: string | null;
+  textColor: string | null;
+  borderColor: string | null;
+  radius: number | null;
+}): string {
+  const styles: string[] = [];
+  const accent = "var(--site-accent)";
+
+  if (style.radius !== null) styles.push(`border-radius:${style.radius}px;`);
+
+  if (style.variant === "outline") {
+    styles.push("background:transparent;");
+    styles.push(`color:${escapeHtml(style.textColor ?? accent)};`);
+    styles.push(`border-color:${escapeHtml(style.borderColor ?? accent)};`);
+    styles.push("border-style:solid;border-width:1px;");
+  } else {
+    if (style.bgColor !== null) styles.push(`background:${escapeHtml(style.bgColor)};`);
+    if (style.textColor !== null) styles.push(`color:${escapeHtml(style.textColor)};`);
+    if (style.borderColor !== null) styles.push(`border-color:${escapeHtml(style.borderColor)};`);
+  }
+
+  return styles.join("");
 }
 
 function renderComponent(component: Component, assetsById: Map<string, Asset>): string {
@@ -55,11 +89,13 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const boxStyle = renderBoxStyle(component.style);
     if (boxStyle) styles.push(boxStyle);
     const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
+    const ctaStyle = renderButtonStyle(component.ctaStyle);
+    const ctaStyleAttr = ctaStyle ? ` style="${ctaStyle}"` : "";
     return `
       <div class="hero"${styleAttr}>
         <h1>${escapeHtml(component.headline)}</h1>
         <p>${escapeHtml(component.subheadline)}</p>
-        <a class="cta" href="${escapeHtml(component.primaryCtaHref)}">${escapeHtml(component.primaryCtaText)}</a>
+        <a class="cta" href="${escapeHtml(component.primaryCtaHref)}"${ctaStyleAttr}>${escapeHtml(component.primaryCtaText)}</a>
       </div>
     `;
   }
@@ -107,6 +143,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const boxStyle = renderBoxStyle(component.style);
     const styleAttr = boxStyle ? ` style="${boxStyle}"` : "";
     const justify = renderButtonJustify(component.style.textAlign);
+    const submitStyle = renderButtonStyle(component.submitStyle);
     return `
       <div class="contactForm" id="contact"${styleAttr}>
         <h3>${escapeHtml(component.headline)}</h3>
@@ -123,7 +160,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
             <label>Message</label>
             <textarea name="message" rows="4"></textarea>
           </div>
-          <button class="btn btnPrimary" type="submit" style="justify-self:${justify};">${escapeHtml(component.submitLabel)}</button>
+          <button class="btn btnPrimary" type="submit" style="justify-self:${justify};${submitStyle}">${escapeHtml(component.submitLabel)}</button>
         </form>
       </div>
     `;
@@ -136,10 +173,17 @@ function renderSection(section: Section, assetsById: Map<string, Asset>): string
   if (!section.settings.visible) return "";
 
   const styles: string[] = [];
-  if (section.style.background) styles.push(`background:${escapeHtml(section.style.background)};`);
+  const sectionGradientFrom = section.style.backgroundGradient?.from ?? null;
+  const sectionGradientTo = section.style.backgroundGradient?.to ?? null;
+  if (sectionGradientFrom && sectionGradientTo) {
+    const angle = section.style.backgroundGradient?.angle ?? 135;
+    styles.push(`background:linear-gradient(${angle}deg, ${escapeHtml(sectionGradientFrom)}, ${escapeHtml(sectionGradientTo)});`);
+  } else if (section.style.background) {
+    styles.push(`background:${escapeHtml(section.style.background)};`);
+  }
   if (section.style.padding !== null) styles.push(`padding:${section.style.padding}px;`);
   if (section.style.maxWidth !== null) styles.push(`max-width:${section.style.maxWidth}px;margin:0 auto;`);
-  if (section.style.background || section.style.padding !== null) styles.push("border-radius:18px;");
+  if ((sectionGradientFrom && sectionGradientTo) || section.style.background || section.style.padding !== null) styles.push("border-radius:18px;");
 
   const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
 

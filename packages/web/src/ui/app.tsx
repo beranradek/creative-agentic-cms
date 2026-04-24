@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { z } from "zod";
 import {
   AssetSchema,
   COMPONENT_MAX_WIDTHS,
+  BUTTON_VARIANTS,
   PageSchema,
   SECTION_GRID_COLUMNS,
   SECTION_LAYOUTS,
@@ -50,6 +52,11 @@ type ComponentBoxStyle = {
   maxWidth: (typeof COMPONENT_MAX_WIDTHS)[number] | null;
   padding: number | null;
   backgroundColor: string | null;
+  backgroundGradient: {
+    from: string | null;
+    to: string | null;
+    angle: number | null;
+  } | null;
 };
 
 function computeBoxOuterStyle(style: ComponentBoxStyle): React.CSSProperties {
@@ -66,7 +73,14 @@ function computeBoxInnerStyle(style: ComponentBoxStyle): React.CSSProperties {
   const out: React.CSSProperties = {};
   if (style.textAlign !== null) out.textAlign = style.textAlign;
   if (style.padding !== null) out.padding = style.padding;
-  if (style.backgroundColor !== null) out.backgroundColor = style.backgroundColor;
+  const gradientFrom = style.backgroundGradient?.from ?? null;
+  const gradientTo = style.backgroundGradient?.to ?? null;
+  if (gradientFrom && gradientTo) {
+    const angle = style.backgroundGradient?.angle ?? 135;
+    out.background = `linear-gradient(${angle}deg, ${gradientFrom}, ${gradientTo})`;
+  } else if (style.backgroundColor !== null) {
+    out.backgroundColor = style.backgroundColor;
+  }
   return out;
 }
 
@@ -74,6 +88,39 @@ function computeButtonJustify(textAlign: ComponentBoxStyle["textAlign"]): React.
   if (textAlign === "center") return "center";
   if (textAlign === "right") return "end";
   return "start";
+}
+
+function computeBackgroundValue(gradient: { from: string | null; to: string | null; angle: number | null } | null, solid: string | null): string | null {
+  const from = gradient?.from ?? null;
+  const to = gradient?.to ?? null;
+  if (from && to) {
+    const angle = gradient?.angle ?? 135;
+    return `linear-gradient(${angle}deg, ${from}, ${to})`;
+  }
+  return solid ?? null;
+}
+
+function computeButtonInlineStyle(style: {
+  variant: (typeof BUTTON_VARIANTS)[number] | null;
+  bgColor: string | null;
+  textColor: string | null;
+  borderColor: string | null;
+  radius: number | null;
+}): React.CSSProperties {
+  const out: React.CSSProperties = {};
+  if (style.radius !== null) out.borderRadius = style.radius;
+  if (style.variant === "outline") {
+    out.background = "transparent";
+    out.color = style.textColor ?? "var(--site-accent)";
+    out.borderColor = style.borderColor ?? "var(--site-accent)";
+    out.borderStyle = "solid";
+    out.borderWidth = 1;
+    return out;
+  }
+  if (style.bgColor !== null) out.background = style.bgColor;
+  if (style.textColor !== null) out.color = style.textColor;
+  if (style.borderColor !== null) out.borderColor = style.borderColor;
+  return out;
 }
 
 function createId(prefix: string): string {
@@ -84,7 +131,7 @@ function createSection(label: string): Section {
   return {
     id: createId("sec"),
     label,
-    style: { background: null, padding: null, maxWidth: null },
+    style: { background: null, backgroundGradient: null, padding: null, maxWidth: null },
     settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
     components: [],
   };
@@ -99,8 +146,9 @@ function createComponent(type: Component["type"]): Component {
       subheadline: "A creative, local-first CMS editor with an agent that can reshape the page as you build.",
       primaryCtaText: "Contact",
       primaryCtaHref: "#contact",
+      ctaStyle: { variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
       backgroundImageAssetId: null,
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "rich_text") {
@@ -108,7 +156,7 @@ function createComponent(type: Component["type"]): Component {
       id: createId("cmp"),
       type: "rich_text",
       html: "<p>Write something compelling. Keep it clear, human, and specific.</p>",
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "contact_form") {
@@ -117,7 +165,8 @@ function createComponent(type: Component["type"]): Component {
       type: "contact_form",
       headline: "Contact",
       submitLabel: "Send",
-      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null },
+      submitStyle: { variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
+      style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
   if (type === "image") {
@@ -2178,7 +2227,7 @@ export function App() {
                             data-testid="preview-section"
                             data-section-id={section.id}
                             style={{
-                              background: section.style.background ?? undefined,
+                              background: computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? undefined,
                               padding: section.style.padding !== null ? section.style.padding : undefined,
                               maxWidth: section.style.maxWidth ?? 980,
                             }}
@@ -3066,6 +3115,7 @@ function PreviewComponent(props: {
           }
         : undefined;
     const innerStyle = computeBoxInnerStyle(component.style);
+    const ctaInlineStyle = computeButtonInlineStyle(component.ctaStyle);
     return (
       <div
         className={wrapperClass}
@@ -3113,7 +3163,7 @@ function PreviewComponent(props: {
           >
             {component.subheadline}
           </p>
-          <a className="cta" href={component.primaryCtaHref} onClick={(e) => e.preventDefault()}>
+          <a className="cta" href={component.primaryCtaHref} style={ctaInlineStyle} onClick={(e) => e.preventDefault()}>
             <span
               contentEditable={isSelected && canEdit}
               suppressContentEditableWarning
@@ -3169,7 +3219,9 @@ function PreviewComponent(props: {
               const raw = e.currentTarget.innerHTML;
               const clean = sanitizeRichTextHtml(raw);
               e.currentTarget.innerHTML = clean;
-              onUpdate({ ...component, html: clean });
+              flushSync(() => {
+                onUpdate({ ...component, html: clean });
+              });
             }}
             dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
@@ -3211,6 +3263,7 @@ function PreviewComponent(props: {
     const outerStyle = computeBoxOuterStyle(component.style);
     const innerStyle = computeBoxInnerStyle(component.style);
     const buttonJustify = computeButtonJustify(component.style.textAlign);
+    const submitInlineStyle = computeButtonInlineStyle(component.submitStyle);
     return (
       <div
         className={wrapperClass}
@@ -3258,7 +3311,12 @@ function PreviewComponent(props: {
               <label>Message</label>
               <textarea rows={4} />
             </div>
-            <button className="btn btnPrimary" type="submit" onClick={(e) => e.preventDefault()} style={{ justifySelf: buttonJustify }}>
+            <button
+              className="btn btnPrimary"
+              type="submit"
+              onClick={(e) => e.preventDefault()}
+              style={{ justifySelf: buttonJustify, ...submitInlineStyle }}
+            >
               <span
                 contentEditable={isSelected && canEdit}
                 suppressContentEditableWarning
@@ -3515,18 +3573,107 @@ function Inspector(props: {
                   onChange={(e) =>
                     onUpdate({
                       ...section,
-                      style: { ...section.style, background: e.target.value },
+                      style: { ...section.style, background: e.target.value, backgroundGradient: null },
                     })
                   }
                 />
                 <button
                   className="btn"
-                  onClick={() => onUpdate({ ...section, style: { ...section.style, background: null } })}
+                  onClick={() => onUpdate({ ...section, style: { ...section.style, background: null, backgroundGradient: null } })}
                   disabled={!canEdit}
                 >
                   Clear
                 </button>
               </div>
+
+              <label className="row" style={{ justifyContent: "space-between", marginTop: 10 }}>
+                <span className="muted">Gradient</span>
+                <input
+                  data-testid="section-bg-gradient-enabled"
+                  type="checkbox"
+                  checked={section.style.backgroundGradient !== null}
+                  disabled={!canEdit}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    onUpdate({
+                      ...section,
+                      style: {
+                        ...section.style,
+                        background: enabled ? null : section.style.background,
+                        backgroundGradient: enabled ? { from: "#ffffff", to: "#e2e8f0", angle: 135 } : null,
+                      },
+                    });
+                  }}
+                />
+              </label>
+
+              {section.style.backgroundGradient ? (
+                <div className="stack" style={{ marginTop: 10 }}>
+                  <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                    <span className="muted">From</span>
+                    <input
+                      data-testid="section-bg-gradient-from"
+                      type="color"
+                      value={section.style.backgroundGradient.from ?? "#ffffff"}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        onUpdate({
+                          ...section,
+                          style: {
+                            ...section.style,
+                            background: null,
+                            backgroundGradient: { ...section.style.backgroundGradient!, from: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                    <span className="muted">To</span>
+                    <input
+                      data-testid="section-bg-gradient-to"
+                      type="color"
+                      value={section.style.backgroundGradient.to ?? "#e2e8f0"}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        onUpdate({
+                          ...section,
+                          style: {
+                            ...section.style,
+                            background: null,
+                            backgroundGradient: { ...section.style.backgroundGradient!, to: e.target.value },
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Angle</label>
+                    <div className="row">
+                      <input
+                        data-testid="section-bg-gradient-angle"
+                        type="range"
+                        min={0}
+                        max={360}
+                        value={section.style.backgroundGradient.angle ?? 135}
+                        disabled={!canEdit}
+                        onChange={(e) =>
+                          onUpdate({
+                            ...section,
+                            style: {
+                              ...section.style,
+                              background: null,
+                              backgroundGradient: { ...section.style.backgroundGradient!, angle: Number(e.target.value) },
+                            },
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      />
+                      <span className="badge">{(section.style.backgroundGradient.angle ?? 135).toFixed(0)}°</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="field">
@@ -3951,12 +4098,89 @@ function ComponentFields(props: {
                 type="color"
                 value={style.backgroundColor ?? "#000000"}
                 disabled={!canEdit}
-                onChange={(e) => setStyle({ ...style, backgroundColor: e.target.value })}
+                onChange={(e) => setStyle({ ...style, backgroundColor: e.target.value, backgroundGradient: null })}
               />
               <button className="btn" disabled={!canEdit} onClick={() => setStyle({ ...style, backgroundColor: null })}>
                 Clear
               </button>
             </div>
+
+            <label className="row" style={{ justifyContent: "space-between", marginTop: 10 }}>
+              <span className="muted">Gradient</span>
+              <input
+                data-testid="component-style-bg-gradient-enabled"
+                type="checkbox"
+                checked={style.backgroundGradient !== null}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setStyle({
+                    ...style,
+                    backgroundColor: enabled ? null : style.backgroundColor,
+                    backgroundGradient: enabled ? { from: "#ffffff", to: "#e2e8f0", angle: 135 } : null,
+                  });
+                }}
+              />
+            </label>
+
+            {style.backgroundGradient ? (
+              <div className="stack" style={{ marginTop: 10 }}>
+                <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                  <span className="muted">From</span>
+                  <input
+                    data-testid="component-style-bg-gradient-from"
+                    type="color"
+                    value={style.backgroundGradient.from ?? "#ffffff"}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setStyle({
+                        ...style,
+                        backgroundColor: null,
+                        backgroundGradient: { ...style.backgroundGradient!, from: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+                  <span className="muted">To</span>
+                  <input
+                    data-testid="component-style-bg-gradient-to"
+                    type="color"
+                    value={style.backgroundGradient.to ?? "#e2e8f0"}
+                    disabled={!canEdit}
+                    onChange={(e) =>
+                      setStyle({
+                        ...style,
+                        backgroundColor: null,
+                        backgroundGradient: { ...style.backgroundGradient!, to: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Angle</label>
+                  <div className="row">
+                    <input
+                      data-testid="component-style-bg-gradient-angle"
+                      type="range"
+                      min={0}
+                      max={360}
+                      value={style.backgroundGradient.angle ?? 135}
+                      disabled={!canEdit}
+                      onChange={(e) =>
+                        setStyle({
+                          ...style,
+                          backgroundColor: null,
+                          backgroundGradient: { ...style.backgroundGradient!, angle: Number(e.target.value) },
+                        })
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span className="badge">{(style.backgroundGradient.angle ?? 135).toFixed(0)}°</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -4017,6 +4241,123 @@ function ComponentFields(props: {
           </div>
         </div>
 
+        <div className="card">
+          <div className="cardTitle">CTA button</div>
+          <div className="stack">
+            <div className="field">
+              <label>Variant</label>
+              <select
+                data-testid="hero-cta-variant"
+                value={component.ctaStyle.variant ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    ctaStyle: {
+                      ...component.ctaStyle,
+                      variant: e.target.value === "" ? null : e.target.value === "outline" ? "outline" : "filled",
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                {BUTTON_VARIANTS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Background</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-bg"
+                  type="color"
+                  value={component.ctaStyle.bgColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, bgColor: e.target.value } })}
+                />
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, bgColor: null } })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Text</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-text"
+                  type="color"
+                  value={component.ctaStyle.textColor ?? "#ffffff"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, textColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, textColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Border</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-border"
+                  type="color"
+                  value={component.ctaStyle.borderColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, borderColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, borderColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Radius</label>
+              <div className="row">
+                <input
+                  data-testid="hero-cta-radius"
+                  type="range"
+                  min={0}
+                  max={28}
+                  value={component.ctaStyle.radius ?? 10}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, radius: Number(e.target.value) } })}
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{component.ctaStyle.radius ?? 10}px</span>
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, radius: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <button
+              className="btn"
+              data-testid="hero-cta-clear"
+              disabled={!canEdit}
+              onClick={() =>
+                onUpdate({ ...component, ctaStyle: { ...component.ctaStyle, variant: null, bgColor: null, textColor: null, borderColor: null, radius: null } })
+              }
+            >
+              Clear button styles
+            </button>
+          </div>
+        </div>
+
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
       </div>
     );
@@ -4059,6 +4400,126 @@ function ComponentFields(props: {
             disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, submitLabel: e.target.value })}
           />
+        </div>
+
+        <div className="card">
+          <div className="cardTitle">Submit button</div>
+          <div className="stack">
+            <div className="field">
+              <label>Variant</label>
+              <select
+                data-testid="contact-submit-variant"
+                value={component.submitStyle.variant ?? ""}
+                disabled={!canEdit}
+                onChange={(e) =>
+                  onUpdate({
+                    ...component,
+                    submitStyle: {
+                      ...component.submitStyle,
+                      variant: e.target.value === "" ? null : e.target.value === "outline" ? "outline" : "filled",
+                    },
+                  })
+                }
+              >
+                <option value="">(auto)</option>
+                {BUTTON_VARIANTS.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Background</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-bg"
+                  type="color"
+                  value={component.submitStyle.bgColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, bgColor: e.target.value } })}
+                />
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, bgColor: null } })}>
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Text</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-text"
+                  type="color"
+                  value={component.submitStyle.textColor ?? "#ffffff"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, textColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, textColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Border</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-border"
+                  type="color"
+                  value={component.submitStyle.borderColor ?? "#000000"}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, borderColor: e.target.value } })}
+                />
+                <button
+                  className="btn"
+                  disabled={!canEdit}
+                  onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, borderColor: null } })}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Radius</label>
+              <div className="row">
+                <input
+                  data-testid="contact-submit-radius"
+                  type="range"
+                  min={0}
+                  max={28}
+                  value={component.submitStyle.radius ?? 10}
+                  disabled={!canEdit}
+                  onChange={(e) => onUpdate({ ...component, submitStyle: { ...component.submitStyle, radius: Number(e.target.value) } })}
+                  style={{ flex: 1 }}
+                />
+                <span className="badge">{component.submitStyle.radius ?? 10}px</span>
+                <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, submitStyle: { ...component.submitStyle, radius: null } })}>
+                  Auto
+                </button>
+              </div>
+            </div>
+
+            <button
+              className="btn"
+              data-testid="contact-submit-clear"
+              disabled={!canEdit}
+              onClick={() =>
+                onUpdate({
+                  ...component,
+                  submitStyle: { ...component.submitStyle, variant: null, bgColor: null, textColor: null, borderColor: null, radius: null },
+                })
+              }
+            >
+              Clear button styles
+            </button>
+          </div>
         </div>
 
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}

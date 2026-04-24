@@ -28,6 +28,27 @@ const HexColorSchema = z
   .nullable()
   .default(null);
 
+export const BackgroundGradientSchema = z
+  .object({
+    from: HexColorSchema,
+    to: HexColorSchema,
+    angle: z.number().int().min(0).max(360).nullable().default(null),
+  })
+  .default({});
+
+export const BUTTON_VARIANTS = ["filled", "outline"] as const;
+const ButtonVariantSchema = z.union([z.literal("filled"), z.literal("outline")]).nullable().default(null);
+
+export const ButtonStyleSchema = z
+  .object({
+    variant: ButtonVariantSchema,
+    bgColor: HexColorSchema,
+    textColor: HexColorSchema,
+    borderColor: HexColorSchema,
+    radius: z.number().int().min(0).max(28).nullable().default(null),
+  })
+  .default({});
+
 export const PageThemeSchema = z
   .object({
     preset: ThemePresetSchema,
@@ -75,6 +96,7 @@ export const HeroComponentSchema = z.object({
   subheadline: z.string().default("A short, meaningful subheadline."),
   primaryCtaText: z.string().default("Get started"),
   primaryCtaHref: z.string().default("#contact"),
+  ctaStyle: ButtonStyleSchema,
   backgroundImageAssetId: AssetIdSchema.nullable().default(null),
   style: z
     .object({
@@ -83,6 +105,7 @@ export const HeroComponentSchema = z.object({
       maxWidth: ComponentMaxWidthSchema,
       padding: BoxPaddingSchema,
       backgroundColor: BackgroundColorSchema,
+      backgroundGradient: BackgroundGradientSchema.nullable().default(null),
     })
     .default({}),
 });
@@ -98,6 +121,7 @@ export const RichTextComponentSchema = z.object({
       maxWidth: ComponentMaxWidthSchema,
       padding: BoxPaddingSchema,
       backgroundColor: BackgroundColorSchema,
+      backgroundGradient: BackgroundGradientSchema.nullable().default(null),
     })
     .default({}),
 });
@@ -124,6 +148,7 @@ export const ContactFormComponentSchema = z.object({
   type: z.literal("contact_form"),
   headline: z.string().default("Contact us"),
   submitLabel: z.string().default("Send"),
+  submitStyle: ButtonStyleSchema,
   style: z
     .object({
       blockAlign: TextAlignSchema,
@@ -131,6 +156,7 @@ export const ContactFormComponentSchema = z.object({
       maxWidth: ComponentMaxWidthSchema,
       padding: BoxPaddingSchema,
       backgroundColor: BackgroundColorSchema,
+      backgroundGradient: BackgroundGradientSchema.nullable().default(null),
     })
     .default({}),
 });
@@ -170,6 +196,7 @@ export const SectionSchema = z.object({
         .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/)
         .nullable()
         .default(null),
+      backgroundGradient: BackgroundGradientSchema.nullable().default(null),
       padding: z.number().int().min(0).max(96).nullable().default(null),
       maxWidth: SectionMaxWidthSchema,
     })

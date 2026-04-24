@@ -786,6 +786,90 @@ test("exported HTML includes component box styles", async ({ page }) => {
   expect(html).toContain("justify-self:center;");
 });
 
+test("exported HTML includes gradients and button styles", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_export_gradients_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  // Add a form into the first section so we have contact_form button styling too.
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+
+  // Section gradient background
+  await page.getByTestId("section-bg-gradient-enabled").check();
+  await page.getByTestId("section-bg-gradient-from").fill("#111111");
+  await page.getByTestId("section-bg-gradient-to").fill("#222222");
+  await page.getByTestId("section-bg-gradient-angle").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "90");
+
+  // Component gradient + hero CTA styles
+  const heroItem = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await heroItem.click();
+  await page.getByTestId("component-style-bg-gradient-enabled").check();
+  await page.getByTestId("component-style-bg-gradient-from").fill("#abcdef");
+  await page.getByTestId("component-style-bg-gradient-to").fill("#123456");
+  await page.getByTestId("component-style-bg-gradient-angle").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "180");
+
+  await page.getByTestId("hero-cta-variant").selectOption("outline");
+  await page.getByTestId("hero-cta-text").fill("#ff0000");
+  await page.getByTestId("hero-cta-border").fill("#00ff00");
+  await page.getByTestId("hero-cta-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "18");
+
+  // Contact form submit button styles
+  const formItem = page.locator('[data-testid="preview-item"][data-component-type="contact_form"]');
+  await formItem.click();
+  await page.getByTestId("contact-submit-bg").fill("#0000ff");
+  await page.getByTestId("contact-submit-radius").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "6");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("export-site").click();
+
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).toContain("background:linear-gradient(90deg, #111111, #222222);");
+  expect(html).toContain("background:linear-gradient(180deg, #abcdef, #123456);");
+  expect(html).toContain("background:transparent;");
+  expect(html).toContain("color:#ff0000;");
+  expect(html).toContain("border-color:#00ff00;");
+  expect(html).toContain("background:#0000ff;");
+  expect(html).toContain("border-radius:6px;");
+});
+
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
   test.skip(!process.env.CAC_E2E_SCREENSHOT, "Set CAC_E2E_SCREENSHOT=1 to enable.");
 
