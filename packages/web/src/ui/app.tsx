@@ -4528,7 +4528,9 @@ function ComponentFields(props: {
             disabled={!canEdit}
             onChange={(e) => onUpdate({ ...component, html: e.target.value })}
           />
-          <div className="muted">MVP: edit raw HTML. Next: true inline editing.</div>
+          <div className="muted">
+            Tip: use the inline editor in Preview (with the formatting toolbar). This textarea is for advanced raw HTML and is sanitized on save/export.
+          </div>
         </div>
 
         {renderBoxStyleCard(component.style, (style) => onUpdate({ ...component, style }))}
