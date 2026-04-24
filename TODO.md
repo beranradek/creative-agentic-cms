@@ -117,7 +117,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] image replace
   - [x] image edit (styles + editor)
   - [ ] style edits + export correctness
-  - [ ] agent run (skip if no key)
+  - [x] agent run (skip if no key)
   - [x] screenshot capture (enable via `CAC_E2E_SCREENSHOT=1`)
 - [ ] ChromeDev MCP “manual script” checklist:
   - [ ] drag, edit, upload, screenshot, agent edit, export.

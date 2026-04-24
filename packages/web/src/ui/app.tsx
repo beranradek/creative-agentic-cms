@@ -1798,6 +1798,7 @@ export function App() {
                             <div className="field" style={{ width: 160 }}>
                               <label>Run</label>
                               <select
+                                data-testid="agent-run-mode"
                                 value={agentRunMode}
                                 onChange={(e) => setAgentRunMode(e.target.value === "suggest" ? "suggest" : "apply")}
                                 disabled={isAgentRunning}

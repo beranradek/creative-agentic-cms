@@ -725,3 +725,27 @@ test("can capture a preview screenshot (server Playwright required)", async ({ p
 
   await expect(page.getByTestId("preview-screenshot")).toBeVisible();
 });
+
+test("agent can apply a simple edit (requires OPENAI_API_KEY on server)", async ({ page }) => {
+  test.skip(!process.env.CAC_E2E_AGENT, "Set CAC_E2E_AGENT=1 to enable.");
+
+  await page.goto("/");
+  const projectId = `e2e_agent_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await expect(page.locator(".hero h1")).toBeVisible();
+
+  const headline = `E2E Agent Headline ${Date.now()}`;
+
+  await ensurePaletteTab(page, "agent");
+  await page.getByTestId("agent-run-mode").selectOption("apply");
+  await expect(page.getByTestId("agent-run")).toHaveText("Run agent");
+  await page.getByTestId("agent-text").fill(
+    `Set the hero headline exactly to "${headline}". Do not change anything else.`
+  );
+  await page.getByTestId("agent-run").click();
+
+  await expect(page.locator(".hero h1")).toContainText(headline, { timeout: 60_000 });
+});
