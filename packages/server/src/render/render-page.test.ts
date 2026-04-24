@@ -170,7 +170,7 @@ describe("renderPageHtml", () => {
             {
               id: "c1",
               type: "rich_text",
-              html: `<p onclick="alert(1)">Hello</p><script>alert(1)</script><a href="javascript:alert(1)">x</a>`,
+              html: `<p onclick="alert(1)">Hello</p><script>alert(1)</script><a href="javascript:alert(1)">x</a><b>Bold</b><i>It</i><div>Line</div>`,
             },
           ],
         },
@@ -181,5 +181,8 @@ describe("renderPageHtml", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onclick=");
     expect(html).not.toContain("javascript:");
+    expect(html).toContain("<strong>Bold</strong>");
+    expect(html).toContain("<em>It</em>");
+    expect(html).toContain("<p>Line</p>");
   });
 });
