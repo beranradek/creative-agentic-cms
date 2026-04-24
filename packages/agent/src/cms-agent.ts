@@ -15,10 +15,25 @@ const AgentInputSchema = z.object({
 
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
-const AgentOutputSchema = z.object({
-  assistantMessage: z.string(),
-  page: PageSchema,
+const ScreenshotRequestOptionsSchema = z.object({
+  width: z.number().int().positive().max(4096).optional(),
+  height: z.number().int().positive().max(4096).optional(),
+  fullPage: z.boolean().optional(),
 });
+
+const AgentOutputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("edit"),
+    assistantMessage: z.string().min(1),
+    page: PageSchema,
+  }),
+  z.object({
+    kind: z.literal("request_screenshot"),
+    assistantMessage: z.string().min(1),
+    reason: z.string().min(1).optional(),
+    options: ScreenshotRequestOptionsSchema.optional(),
+  }),
+]);
 
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
@@ -31,6 +46,8 @@ You edit a single page represented as JSON.
 
 Rules:
 - Output MUST match the provided JSON schema (structured output).
+- If the screenshot is not available and the user request depends on visual details (layout, spacing, colors, alignment),
+  output kind="request_screenshot" instead of guessing. Keep assistantMessage short and actionable.
 - Preserve existing ids whenever you edit existing content.
 - When creating new ids, use deterministic prefixes:
   - sec_<uuid> for sections
@@ -176,6 +193,7 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
       apiKey: process.env.OPENAI_API_KEY,
     }).withStructuredOutput(AgentOutputSchema, { name: "cms_edit_page" });
 
+    const screenshotAvailable = Boolean(parsed.screenshotUrl && parsed.screenshotPngBase64);
     const userText = `Project: ${parsed.projectId}
 
 Page snapshot (for fast understanding):
@@ -186,6 +204,9 @@ ${parsed.markupHtmlExcerpt ?? "(not available)"}
 
 Latest screenshot (rendered preview):
 ${parsed.screenshotUrl ?? "(not available)"}
+
+Screenshot availability:
+${screenshotAvailable ? "PNG image provided (base64)." : "No image data provided."}
 
 Current page JSON (authoritative, must be edited via schema):
 ${JSON.stringify(parsed.page, null, 2)}

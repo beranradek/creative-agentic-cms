@@ -332,6 +332,12 @@ const DiffSummarySchema = z.object({
 
 type DiffSummary = z.infer<typeof DiffSummarySchema>;
 
+const ScreenshotRequestOptionsSchema = z.object({
+  width: z.number().int().positive().max(4096).optional(),
+  height: z.number().int().positive().max(4096).optional(),
+  fullPage: z.boolean().optional(),
+});
+
 async function apiAgentChat(
   projectId: string,
   message: string,
@@ -344,6 +350,9 @@ async function apiAgentChat(
   page: Page;
   proposedPage?: Page;
   diffSummary?: DiffSummary;
+  requestScreenshot?: boolean;
+  requestScreenshotReason?: string;
+  requestScreenshotOptions?: z.infer<typeof ScreenshotRequestOptionsSchema>;
   pageEtag: string | null;
 }> {
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -370,10 +379,27 @@ async function apiAgentChat(
   const proposedPage = typeof proposedPageRaw === "undefined" ? undefined : PageSchema.parse(proposedPageRaw);
   const diffSummaryRaw = (json as { diffSummary?: unknown }).diffSummary;
   const diffSummary = typeof diffSummaryRaw === "undefined" ? undefined : DiffSummarySchema.parse(diffSummaryRaw);
+  const requestScreenshot = z.boolean().optional().parse((json as { requestScreenshot?: unknown }).requestScreenshot);
+  const requestScreenshotReason = z
+    .string()
+    .optional()
+    .parse((json as { requestScreenshotReason?: unknown }).requestScreenshotReason);
+  const requestScreenshotOptions = ScreenshotRequestOptionsSchema.optional().parse(
+    (json as { requestScreenshotOptions?: unknown }).requestScreenshotOptions
+  );
   const base = { assistantMessage, applied, page };
   const withProposal = proposedPage ? { ...base, proposedPage } : base;
   const withDiff = diffSummary ? { ...withProposal, diffSummary } : withProposal;
-  return { ...withDiff, pageEtag: getEtagHeader(res) };
+  const extra: Partial<{
+    requestScreenshot: boolean;
+    requestScreenshotReason: string;
+    requestScreenshotOptions: z.infer<typeof ScreenshotRequestOptionsSchema>;
+  }> = {};
+  if (typeof requestScreenshot !== "undefined") extra.requestScreenshot = requestScreenshot;
+  if (typeof requestScreenshotReason !== "undefined") extra.requestScreenshotReason = requestScreenshotReason;
+  if (typeof requestScreenshotOptions !== "undefined") extra.requestScreenshotOptions = requestScreenshotOptions;
+
+  return { ...withDiff, ...extra, pageEtag: getEtagHeader(res) };
 }
 
 async function apiApplyAgentProposal(
@@ -1168,7 +1194,43 @@ export function App() {
         // Best-effort: continue without screenshot (server might not have Playwright installed).
       }
 
-      const result = await apiAgentChat(activeProjectId, trimmed, agentRunMode, latestScreenshotUrl, baseEtag);
+      const runChat = async (shotUrl?: string) =>
+        await apiAgentChat(activeProjectId, trimmed, agentRunMode, shotUrl, baseEtag);
+
+      let result = await runChat(latestScreenshotUrl);
+      if (result.requestScreenshot) {
+        setAgentReply(result.assistantMessage);
+        toast.info("Agent requested a screenshot", result.requestScreenshotReason ?? "Capturing and retrying…");
+        try {
+          const options = result.requestScreenshotOptions;
+          const shot = await apiCaptureScreenshot(activeProjectId, {
+            width: options?.width ?? 1024,
+            height: options?.height ?? 768,
+            fullPage: options?.fullPage ?? false,
+          });
+          latestScreenshotUrl = shot.screenshotUrl;
+          setScreenshotUrl(shot.screenshotUrl);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Screenshot capture failed";
+          setAgentError(message);
+          toast.error("Screenshot capture failed", message);
+          return;
+        }
+
+        if (latestPageJsonRef.current !== baseJson) {
+          setAgentError("Page changed while capturing a screenshot. Result discarded (rerun the agent).");
+          toast.error("Agent result discarded", "Page changed while capturing screenshot.");
+          return;
+        }
+
+        result = await runChat(latestScreenshotUrl);
+        if (result.requestScreenshot) {
+          setAgentReply(result.assistantMessage);
+          setAgentError("Agent asked for another screenshot. Stopping to avoid a loop; try capturing manually and rerun.");
+          toast.error("Agent needs screenshot", "Capture manually and rerun.");
+          return;
+        }
+      }
       setAgentReply(result.assistantMessage);
       setAgentDiffSummary(result.diffSummary ?? null);
       if (latestPageJsonRef.current !== baseJson) {

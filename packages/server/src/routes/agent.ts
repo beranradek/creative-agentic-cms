@@ -146,6 +146,18 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
         markupHtmlExcerpt,
       });
 
+      if (output.kind === "request_screenshot") {
+        res.json({
+          assistantMessage: output.assistantMessage,
+          applied: false,
+          page,
+          requestScreenshot: true,
+          requestScreenshotReason: output.reason,
+          requestScreenshotOptions: output.options,
+        });
+        return;
+      }
+
       const nextPage = PageSchema.parse(output.page);
       if (body.mode === "apply") {
         const budget: DiffBudget = {
