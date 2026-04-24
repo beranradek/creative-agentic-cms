@@ -64,7 +64,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Modal editor with zoom/pan/crop presets + output resize.
   - [x] Non-destructive workflow (save as new asset + optional replace usages).
   - [x] “Update image in preview” UX (select image → Edit/Replace buttons).
-  - [ ] Crop rectangle resize handles + keyboard nudges (optional UX upgrade).
+  - [x] Crop rectangle resize handles + keyboard nudges (optional UX upgrade).
   - [ ] Rotate / flip (optional).
 
 ## Milestone 5 — Visual Styling (pleasant, powerful)

@@ -636,6 +636,68 @@ test("asset file can be replaced (keeps same asset id)", async ({ page }) => {
   expect(imageComponent.assetId).toBe(imgAssetBefore.id);
 });
 
+test("image editor supports crop resize handles + keyboard nudges", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_img_edit_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "images");
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
+  });
+
+  await expect(page.getByTestId("asset-edit-btn").first()).toBeVisible();
+  await page.getByTestId("asset-edit-btn").first().click();
+
+  await expect(page.getByTestId("image-editor-viewport")).toBeVisible();
+  await expect(page.getByTestId("image-editor-cropbox")).toBeVisible();
+
+  await page.getByTestId("image-editor-viewport").click({ position: { x: 10, y: 10 } });
+  await expect(page.getByTestId("image-editor-viewport")).toBeFocused();
+
+  // Zoom in a bit to ensure there's enough slack for panning.
+  await page.keyboard.press("=");
+  await page.keyboard.press("=");
+
+  const img = page.getByTestId("image-editor-image");
+  const beforeOffset = await img.evaluate((el) => {
+    const t = (el as HTMLImageElement).style.transform || "";
+    const m = t.match(/translate\(-50%, -50%\)\s*translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)/);
+    if (!m) return { x: 0, y: 0 };
+    return { x: Number(m[1]), y: Number(m[2]) };
+  });
+
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.up("Shift");
+
+  const afterOffset = await img.evaluate((el) => {
+    const t = (el as HTMLImageElement).style.transform || "";
+    const m = t.match(/translate\(-50%, -50%\)\s*translate\(([-0-9.]+)px,\s*([-0-9.]+)px\)/);
+    if (!m) return { x: 0, y: 0 };
+    return { x: Number(m[1]), y: Number(m[2]) };
+  });
+
+  expect(afterOffset.y).toBeGreaterThan(beforeOffset.y);
+
+  const cropScale = page.getByTestId("image-editor-cropscale");
+  const beforeScale = Number(await cropScale.inputValue());
+
+  const handle = page.getByTestId("image-editor-crophandle-se");
+  const hb = await handle.boundingBox();
+  if (!hb) throw new Error("Missing crop handle bounding box");
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x - 80, hb.y - 80);
+  await page.mouse.up();
+
+  const afterScale = Number(await cropScale.inputValue());
+  expect(afterScale).toBeLessThan(beforeScale);
+});
+
 test("image style (radius + max width) persists", async ({ page }) => {
   await page.goto("/");
 
@@ -649,8 +711,11 @@ test("image style (radius + max width) persists", async ({ page }) => {
     buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
   });
 
-  const imageItem = page.locator('[data-testid="preview-item"][data-component-type="image"]');
-  await imageItem.click();
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  const imageRow = page.locator('[data-testid="inspector-component-row"][data-component-type="image"]');
+  await expect(imageRow).toBeVisible();
+  await imageRow.getByRole("button", { name: "image" }).click();
+  await expect(page.getByTestId("image-style-maxwidth")).toBeVisible();
 
   await page.getByTestId("image-style-maxwidth").selectOption("480");
   await page.getByTestId("image-style-radius").evaluate((el, value) => {
@@ -732,8 +797,14 @@ test("exported HTML includes section + image styles", async ({ page }) => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "24");
 
-  const imageItem = page.locator('[data-testid="preview-item"][data-component-type="image"]');
-  await imageItem.click();
+  const sectionCards = page.getByTestId("structure-section-card");
+  await expect(sectionCards).toHaveCount(2);
+  await sectionCards.nth(1).getByRole("button", { name: "Select" }).click();
+
+  const imageRow = page.locator('[data-testid="inspector-component-row"][data-component-type="image"]');
+  await expect(imageRow).toBeVisible();
+  await imageRow.getByRole("button", { name: "image" }).click();
+  await expect(page.getByTestId("image-style-maxwidth")).toBeVisible();
   await page.getByTestId("image-style-maxwidth").selectOption("480");
   await page.getByTestId("image-style-radius").evaluate((el, value) => {
     const input = el as HTMLInputElement;

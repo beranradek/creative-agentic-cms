@@ -2129,6 +2129,7 @@ export function App() {
                                     <button
                                       className="btn"
                                       disabled={!canEdit}
+                                      data-testid="asset-edit-btn"
                                       onClick={() => setImageEditor({ kind: "asset", assetId: asset.id, replaceAllUsages: false })}
                                     >
                                       Edit
@@ -3535,7 +3536,7 @@ function PreviewComponent(props: {
                 }}
               />
             </label>
-            <button className="btn" onClick={() => onEditImage?.()} disabled={!canEdit || !onEditImage}>
+            <button className="btn" data-testid="preview-image-edit" onClick={() => onEditImage?.()} disabled={!canEdit || !onEditImage}>
               Edit
             </button>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
@@ -4904,6 +4905,8 @@ function ImageEditorModal(props: {
   const { title, srcUrl, canEdit, replaceAllUsages, onChangeReplaceAllUsages, onCancel, onSave } = props;
   const src = srcUrl();
 
+  type CropHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
@@ -5002,6 +5005,7 @@ function ImageEditorModal(props: {
       if (!computed) return;
       const el = viewportRef.current;
       if (!el) return;
+      el.focus();
       el.setPointerCapture(e.pointerId);
       const start = { x: e.clientX, y: e.clientY };
       const startOffset = { ...offset };
@@ -5019,6 +5023,118 @@ function ImageEditorModal(props: {
       window.addEventListener("pointercancel", onUp);
     },
     [canEdit, computed, offset]
+  );
+
+  const onViewportKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!canEdit) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      }
+
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const nudge = e.shiftKey ? 10 : 1;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x - nudge, y: prev.y }));
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x + nudge, y: prev.y }));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x, y: prev.y - nudge }));
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x, y: prev.y + nudge }));
+        return;
+      }
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom((prev) => clamp(prev + 0.05, 1, 3));
+        return;
+      }
+      if (e.key === "-") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom((prev) => clamp(prev - 0.05, 1, 3));
+        return;
+      }
+      if (e.key === "0") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom(1);
+        setOffset({ x: 0, y: 0 });
+      }
+    },
+    [canEdit]
+  );
+
+  const onCropHandlePointerDown = useCallback(
+    (e: React.PointerEvent, handle: CropHandle) => {
+      if (!canEdit) return;
+      if (!computed) return;
+      const viewportEl = viewportRef.current;
+      if (!viewportEl) return;
+      viewportEl.focus();
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = viewportEl.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const minScale = 0.5;
+      const maxScale = 0.95;
+
+      const updateFromPointer = (clientX: number, clientY: number) => {
+        const halfW =
+          handle.includes("w") ? Math.max(18, centerX - clientX) : handle.includes("e") ? Math.max(18, clientX - centerX) : rect.width / 2;
+        const halfH =
+          handle.includes("n") ? Math.max(18, centerY - clientY) : handle.includes("s") ? Math.max(18, clientY - centerY) : rect.height / 2;
+
+        const scaleW = (2 * halfW) / rect.width;
+        const scaleH = (2 * halfH) / rect.height;
+
+        let next = cropScale;
+        if (handle === "e" || handle === "w") next = scaleW;
+        else if (handle === "n" || handle === "s") next = scaleH;
+        else next = Math.max(scaleW, scaleH);
+
+        setCropScale(clamp(next, minScale, maxScale));
+      };
+
+      const startTarget = e.currentTarget as HTMLElement;
+      startTarget.setPointerCapture(e.pointerId);
+      updateFromPointer(e.clientX, e.clientY);
+
+      const onMove = (ev: PointerEvent) => updateFromPointer(ev.clientX, ev.clientY);
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [canEdit, computed, cropScale]
   );
 
   const renderToFile = useCallback(async (): Promise<File> => {
@@ -5082,12 +5198,22 @@ function ImageEditorModal(props: {
         <div className="modalBody">
           {src ? (
             <div className="stack" style={{ gap: 12 }}>
-              <div className="cropViewport" ref={viewportRef} onPointerDown={onPointerDown}>
+              <div
+                className="cropViewport"
+                ref={viewportRef}
+                data-testid="image-editor-viewport"
+                tabIndex={canEdit ? 0 : -1}
+                aria-label="Image crop viewport"
+                aria-describedby="image-editor-tip"
+                onPointerDown={onPointerDown}
+                onKeyDown={onViewportKeyDown}
+              >
                 <img
                   ref={imgRef}
                   src={src}
                   alt=""
                   draggable={false}
+                  data-testid="image-editor-image"
                   onLoad={(e) => {
                     const el = e.currentTarget;
                     setNatural({ w: el.naturalWidth, h: el.naturalHeight });
@@ -5120,17 +5246,74 @@ function ImageEditorModal(props: {
                 {computed ? (
                   <div
                     className="cropBox"
+                    data-testid="image-editor-cropbox"
                     style={{
                       left: computed.crop.x,
                       top: computed.crop.y,
                       width: computed.crop.w,
                       height: computed.crop.h,
                     }}
-                  />
+                  >
+                    {canEdit ? (
+                      <>
+                        <div
+                          className="cropHandle"
+                          data-dir="nw"
+                          data-testid="image-editor-crophandle-nw"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "nw")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="n"
+                          data-testid="image-editor-crophandle-n"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "n")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="ne"
+                          data-testid="image-editor-crophandle-ne"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "ne")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="e"
+                          data-testid="image-editor-crophandle-e"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "e")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="se"
+                          data-testid="image-editor-crophandle-se"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "se")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="s"
+                          data-testid="image-editor-crophandle-s"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "s")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="sw"
+                          data-testid="image-editor-crophandle-sw"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "sw")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="w"
+                          data-testid="image-editor-crophandle-w"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "w")}
+                        />
+                      </>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
 
               {error ? <div className="card">{error}</div> : null}
+              <div className="muted" id="image-editor-tip">
+                Tip: drag to pan • resize handles adjust crop size • Arrow keys nudge (Shift = bigger) • +/- zoom • 0 resets view
+              </div>
 
               <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div className="field" style={{ minWidth: 160 }}>
@@ -5147,6 +5330,7 @@ function ImageEditorModal(props: {
                 <div className="field" style={{ minWidth: 220, flex: 1 }}>
                   <label>Zoom</label>
                   <input
+                    data-testid="image-editor-zoom"
                     type="range"
                     min={1}
                     max={3}
@@ -5160,6 +5344,7 @@ function ImageEditorModal(props: {
                 <div className="field" style={{ minWidth: 220, flex: 1 }}>
                   <label>Crop size</label>
                   <input
+                    data-testid="image-editor-cropscale"
                     type="range"
                     min={0.5}
                     max={0.95}
