@@ -95,9 +95,9 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Guard: no implicit deletions.
   - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.
   - [x] Guard: limit change magnitude unless user asks (diff budget).
-  - [ ] Prompt templates per component type.
+  - [x] Prompt templates per component type.
 - [ ] Tools:
-  - [ ] Agent can request a refreshed screenshot.
+  - [x] Agent can request a refreshed screenshot.
   - [ ] Agent can add images by generating prompts / placeholders (future).
 
 ## Milestone 7 — Export (static site quality)

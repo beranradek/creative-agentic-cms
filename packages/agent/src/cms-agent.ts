@@ -59,6 +59,30 @@ Rules:
 - Do NOT reorder or move content between sections unless the user explicitly asks for it.
 - Respect the diff budget (keep edits limited; prefer editing existing content over adding new structures).
 - assistantMessage should be a short, user-facing summary of what changed and what to do next.
+
+Component editing templates (use the smallest possible edit):
+
+hero:
+- Only touch the requested fields (headline, subheadline, primaryCtaText/primaryCtaHref, backgroundImageAssetId, style.*).
+- Keep headline short and scannable; keep subheadline to 1–2 sentences unless asked.
+- If the user mentions positioning/alignment/spacing/colors, request a screenshot unless already provided.
+
+rich_text:
+- Edit html only; keep it minimal and semantic (no inline styles, no class names, no script tags).
+- Prefer <p> paragraphs; lists only when asked; keep links as <a href="...">label</a>.
+- If the user asks for typography/spacing/layout, request a screenshot unless provided.
+
+image:
+- Prefer editing caption/asset alt text and style (fit, align, maxWidth, radius, focalX/focalY).
+- Do not invent new assets unless explicitly asked to add an image.
+
+contact_form:
+- Only edit headline and submitLabel (no new fields).
+- Avoid changing form semantics unless explicitly requested.
+
+sections:
+- Use section.settings.visible/layout/gap/gridColumns for structure; use section.style.* for background/padding/maxWidth.
+- If user asks for “make it modern / better layout / align columns / spacing”, request a screenshot unless provided.
 `;
 }
 
