@@ -212,6 +212,8 @@ type DragPayload =
   | { kind: "section"; sectionId: string }
   | { kind: "component"; sectionId: string; componentId: string };
 
+type DropPosition = "before" | "after";
+
 let inMemoryDragPayload: DragPayload | null = null;
 
 function setDragPayload(e: React.DragEvent, payload: DragPayload) {
@@ -252,6 +254,88 @@ function getDragPayload(e: React.DragEvent): DragPayload | null {
     }
   }
   return inMemoryDragPayload;
+}
+
+function computeDropPosition(rect: DOMRect, clientY: number): DropPosition {
+  const mid = rect.top + rect.height / 2;
+  return clientY >= mid ? "after" : "before";
+}
+
+let lastAutoScrollAtMs = 0;
+function findScrollParent(start: HTMLElement): HTMLElement | null {
+  let el: HTMLElement | null = start;
+  while (el) {
+    const style = getComputedStyle(el);
+    const overflowY = style.overflowY;
+    const canScroll = (overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight + 1;
+    if (canScroll) return el;
+    el = el.parentElement;
+  }
+  const scrolling = document.scrollingElement;
+  return scrolling && scrolling instanceof HTMLElement ? scrolling : null;
+}
+
+function autoScrollDuringDrag(target: HTMLElement, clientY: number) {
+  const now = Date.now();
+  if (now - lastAutoScrollAtMs < 30) return;
+  lastAutoScrollAtMs = now;
+
+  const scrollParent = findScrollParent(target);
+  if (!scrollParent) return;
+  const rect = scrollParent.getBoundingClientRect();
+
+  const edge = 60;
+  const maxStep = 22;
+  const topDist = clientY - rect.top;
+  const bottomDist = rect.bottom - clientY;
+
+  if (topDist < edge) {
+    const t = Math.max(0, Math.min(1, (edge - topDist) / edge));
+    scrollParent.scrollTop -= Math.ceil(maxStep * t);
+  } else if (bottomDist < edge) {
+    const t = Math.max(0, Math.min(1, (edge - bottomDist) / edge));
+    scrollParent.scrollTop += Math.ceil(maxStep * t);
+  }
+}
+
+function moveComponentByIndex(args: {
+  sections: Section[];
+  fromSectionId: string;
+  fromComponentId: string;
+  toSectionId: string;
+  toIndex: number; // 0..len (append allowed)
+}): Section[] {
+  const { sections, fromSectionId, fromComponentId, toSectionId, toIndex } = args;
+  const fromSection = sections.find((s) => s.id === fromSectionId);
+  const toSection = sections.find((s) => s.id === toSectionId);
+  if (!fromSection || !toSection) return sections;
+  const moving = fromSection.components.find((c) => c.id === fromComponentId);
+  if (!moving) return sections;
+
+  if (fromSectionId === toSectionId) {
+    const fromIndex = fromSection.components.findIndex((c) => c.id === fromComponentId);
+    if (fromIndex < 0) return sections;
+    const remaining = fromSection.components.slice();
+    remaining.splice(fromIndex, 1);
+    const adjustedIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    const clamped = Math.max(0, Math.min(remaining.length, adjustedIndex));
+    if (clamped === fromIndex) return sections;
+    remaining.splice(clamped, 0, moving);
+    return sections.map((s) => (s.id === fromSectionId ? { ...s, components: remaining } : s));
+  }
+
+  return sections.map((s) => {
+    if (s.id === fromSectionId) {
+      return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
+    }
+    if (s.id === toSectionId) {
+      const next = s.components.slice();
+      const clamped = Math.max(0, Math.min(next.length, toIndex));
+      next.splice(clamped, 0, moving);
+      return { ...s, components: next };
+    }
+    return s;
+  });
 }
 
 function getEtagHeader(res: Response): string | null {
@@ -582,6 +666,8 @@ export function App() {
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+  const [editingSectionLabelId, setEditingSectionLabelId] = useState<string | null>(null);
+  const [editingSectionLabelValue, setEditingSectionLabelValue] = useState("");
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -2030,38 +2116,23 @@ export function App() {
                               replaceAllUsages: false,
                             });
                           }}
-                          onMoveHere={(fromSectionId, fromComponentId) => {
+                          onMoveHere={(_fromSectionId, fromComponentId, position) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
+                              const targetIndex = toSection.components.findIndex((c) => c.id === component.id);
+                              if (targetIndex < 0) return prev;
+                              const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
 
-                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
-                              if (!moving) return prev;
-
-                              const nextSections = prev.sections.map((s) => {
-                                if (s.id === actualFromSectionId && s.id === section.id) {
-                                  const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
-                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
-                                  if (fromIndex < 0 || toIndex < 0) return s;
-                                  return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
-                                }
-
-                                if (s.id === actualFromSectionId) {
-                                  return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
-                                }
-
-                                if (s.id === section.id) {
-                                  const toIndex = s.components.findIndex((c) => c.id === component.id);
-                                  if (toIndex < 0) return s;
-                                  const next = s.components.slice();
-                                  next.splice(toIndex, 0, moving);
-                                  return { ...s, components: next };
-                                }
-
-                                return s;
+                              const nextSections = moveComponentByIndex({
+                                sections: prev.sections,
+                                fromSectionId: actualFromSectionId,
+                                fromComponentId,
+                                toSectionId: section.id,
+                                toIndex,
                               });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
@@ -2076,38 +2147,27 @@ export function App() {
                         <PreviewDropZone
                           key={`${section.id}-dropzone`}
                           sectionId={section.id}
-                          onMoveToEnd={(fromSectionId, fromComponentId) => {
+                          onMoveToEnd={(_fromSectionId, fromComponentId) => {
                             if (!canEdit) return;
                             updatePage((prev) => {
                               const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
-                              const moving = fromSection.components.find((c) => c.id === fromComponentId);
-                              if (!moving) return prev;
+                              const nextSections = moveComponentByIndex({
+                                sections: prev.sections,
+                                fromSectionId: actualFromSectionId,
+                                fromComponentId,
+                                toSectionId: section.id,
+                                toIndex: toSection.components.length,
+                              });
 
-                            const nextSections = prev.sections.map((s) => {
-                              if (s.id === actualFromSectionId && s.id === section.id) {
-                                const fromIndex = s.components.findIndex((c) => c.id === fromComponentId);
-                                const toIndex = s.components.length - 1;
-                                if (fromIndex < 0) return s;
-                                return { ...s, components: moveInArray(s.components, fromIndex, toIndex) };
-                              }
-                              if (s.id === actualFromSectionId) {
-                                return { ...s, components: s.components.filter((c) => c.id !== fromComponentId) };
-                              }
-                              if (s.id === section.id) {
-                                return { ...s, components: [...s.components, moving] };
-                              }
-                              return s;
+                              return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            return PageSchema.parse({ ...prev, sections: nextSections });
-                          });
-
-                          setSelected((prevSel) =>
-                            prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                          );
+                            setSelected((prevSel) =>
+                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
+                            );
                           }}
                         />
                       </div>
@@ -2168,9 +2228,10 @@ export function App() {
                     className="card"
                     data-testid="structure-section-card"
                     data-section-id={section.id}
-                    draggable={canEdit}
+                    draggable={canEdit && editingSectionLabelId !== section.id}
                     onDragStart={(e) => {
                       if (!canEdit) return;
+                      if (editingSectionLabelId === section.id) return;
                       setDragPayload(e, { kind: "section", sectionId: section.id });
                     }}
                     onDragEnd={() => clearDragPayload()}
@@ -2204,7 +2265,52 @@ export function App() {
                   >
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="row" style={{ gap: 10 }}>
-                        <div className="cardTitle">{section.label}</div>
+                        {editingSectionLabelId === section.id && canEdit ? (
+                          <input
+                            data-testid="section-label-input"
+                            value={editingSectionLabelValue}
+                            onChange={(e) => setEditingSectionLabelValue(e.target.value)}
+                            autoFocus
+                            style={{ width: 220 }}
+                            onBlur={() => {
+                              const next = sanitizeInlineText(editingSectionLabelValue);
+                              setEditingSectionLabelId(null);
+                              setEditingSectionLabelValue("");
+                              if (!next) return;
+                              updatePage((prev) =>
+                                PageSchema.parse({
+                                  ...prev,
+                                  sections: prev.sections.map((s) => (s.id === section.id ? { ...s, label: next } : s)),
+                                })
+                              );
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setEditingSectionLabelId(null);
+                                setEditingSectionLabelValue("");
+                                return;
+                              }
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="cardTitle"
+                            data-testid="section-label"
+                            onDoubleClick={() => {
+                              if (!canEdit) return;
+                              setEditingSectionLabelId(section.id);
+                              setEditingSectionLabelValue(section.label);
+                            }}
+                            title={canEdit ? "Double-click to rename" : undefined}
+                          >
+                            {section.label}
+                          </div>
+                        )}
                         {!section.settings.visible ? <span className="badge">hidden</span> : null}
                       </div>
                       <div className="row">
@@ -2323,7 +2429,7 @@ function PreviewComponent(props: {
   onDuplicate: () => void;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   onEditImage?: () => void;
-  onMoveHere: (fromSectionId: string, fromComponentId: string) => void;
+  onMoveHere: (fromSectionId: string, fromComponentId: string, position: DropPosition) => void;
 }) {
   const {
     sectionId,
@@ -2340,13 +2446,27 @@ function PreviewComponent(props: {
     onEditImage,
     onMoveHere,
   } = props;
-  const wrapperClass = isSelected ? "previewItem previewItemSelected" : "previewItem";
+  const [isHovering, setIsHovering] = useState(false);
+  const [dropHint, setDropHint] = useState<{ isOver: boolean; position: DropPosition }>({ isOver: false, position: "before" });
+  const showToolbar = (isSelected || isHovering) && canEdit;
+
+  const wrapperClass = [
+    "previewItem",
+    isSelected ? "previewItemSelected" : "",
+    dropHint.isOver ? (dropHint.position === "before" ? "previewItemDropBefore" : "previewItemDropAfter") : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const onDragOverTarget = (e: React.DragEvent) => {
     if (!canEdit) return;
     const payload = getDragPayload(e);
     if (!payload || payload.kind !== "component") return;
     e.preventDefault();
+    autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = computeDropPosition(rect, e.clientY);
+    setDropHint((prev) => (prev.isOver && prev.position === position ? prev : { isOver: true, position }));
   };
 
   const onDropTarget = (e: React.DragEvent) => {
@@ -2355,8 +2475,11 @@ function PreviewComponent(props: {
     if (!payload || payload.kind !== "component") return;
     e.preventDefault();
     clearDragPayload();
+    setDropHint((prev) => (prev.isOver ? { ...prev, isOver: false } : prev));
     if (payload.sectionId === sectionId && payload.componentId === component.id) return;
-    onMoveHere(payload.sectionId, payload.componentId);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = computeDropPosition(rect, e.clientY);
+    onMoveHere(payload.sectionId, payload.componentId, position);
   };
 
   const dragProps = {
@@ -2370,10 +2493,15 @@ function PreviewComponent(props: {
       // Defer clearing so drop handlers can still read the in-memory payload if needed.
       setTimeout(() => clearDragPayload(), 0);
     },
-    onDragOver: onDragOverTarget,
     onDragOverCapture: onDragOverTarget,
-    onDrop: onDropTarget,
+    onDragLeave: (e: React.DragEvent) => {
+      const related = e.relatedTarget;
+      if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+      setDropHint((prev) => (prev.isOver ? { ...prev, isOver: false } : prev));
+    },
     onDropCapture: onDropTarget,
+    onMouseEnter: () => setIsHovering(true),
+    onMouseLeave: () => setIsHovering(false),
   };
   if (component.type === "hero") {
     const outerStyle = computeBoxOuterStyle(component.style);
@@ -2404,7 +2532,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
@@ -2476,14 +2604,16 @@ function PreviewComponent(props: {
           {...dragProps}
           onClick={() => onSelect()}
         >
-          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
-            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
-              Duplicate
-            </button>
-            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
-              Delete
-            </button>
-          </div>
+          {showToolbar ? (
+            <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+              <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()}>
+                Duplicate
+              </button>
+              <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()}>
+                Delete
+              </button>
+            </div>
+          ) : null}
           <div
             key={`${component.id}-edit`}
             className="richText richTextEditable"
@@ -2513,6 +2643,16 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
+        {showToolbar ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
+              Delete
+            </button>
+          </div>
+        ) : null}
         <div
           key={`${component.id}-view`}
           className="richText"
@@ -2537,7 +2677,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
               Duplicate
@@ -2621,7 +2761,7 @@ function PreviewComponent(props: {
         {...dragProps}
         onClick={() => onSelect()}
       >
-        {isSelected ? (
+        {showToolbar ? (
           <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
             <label className="btn" data-testid="preview-image-replace" style={!canEdit ? { opacity: 0.6, pointerEvents: "none" } : undefined}>
               Replace
@@ -2717,9 +2857,14 @@ function PreviewDropZone(props: {
         const payload = getDragPayload(e);
         if (!payload || payload.kind !== "component") return;
         e.preventDefault();
+        autoScrollDuringDrag(e.currentTarget as HTMLElement, e.clientY);
         setIsOver(true);
       }}
-      onDragLeave={() => setIsOver(false)}
+      onDragLeave={(e) => {
+        const related = e.relatedTarget;
+        if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
+        setIsOver(false);
+      }}
       onDrop={(e) => {
         const payload = getDragPayload(e);
         if (!payload || payload.kind !== "component") return;

@@ -403,6 +403,27 @@ body {
   outline-color: rgba(37, 99, 235, 0.75);
 }
 
+.previewItemDropBefore::before,
+.previewItemDropAfter::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.95);
+  box-shadow: 0 8px 18px rgba(124, 92, 255, 0.28);
+  pointer-events: none;
+}
+
+.previewItemDropBefore::before {
+  top: -8px;
+}
+
+.previewItemDropAfter::after {
+  bottom: -8px;
+}
+
 .previewDropZone {
   border: 1px dashed rgba(15, 23, 42, 0.18);
   border-radius: 14px;

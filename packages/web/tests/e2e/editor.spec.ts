@@ -180,6 +180,29 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await expect(cards.nth(1)).toContainText("2 components");
 });
 
+test("selection follows component when moved across sections in Preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_cross_section_selection_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-text").click();
+
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  await hero.click();
+
+  await expect(page.locator(".previewItemSelected")).toHaveCount(1);
+  await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
+
+  await hero.dragTo(text);
+
+  await expect(page.locator(".previewItemSelected")).toHaveCount(1);
+  await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
+});
+
 test("components can be reordered via drag and drop within a section (Inspector list)", async ({ page }) => {
   await page.goto("/");
 
@@ -309,6 +332,78 @@ test("section visibility hides in Preview and export", async ({ page }) => {
   const html = await htmlRes.text();
   expect(html).not.toContain("Design. Compose. Publish.");
   expect(html).toContain("Write something compelling.");
+});
+
+test("section label can be renamed from Structure and persists", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_label_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByTestId("section-label").dblclick();
+  await page.getByTestId("section-label-input").fill("Above the fold");
+  await page.getByTestId("section-label-input").press("Enter");
+  await expect(sectionCard).toContainText("Above the fold");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await expect(page.getByTestId("structure-section-card").first()).toContainText("Above the fold");
+});
+
+test("preview drag-and-drop uses before/after drop position", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_drop_pos_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+
+  const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
+  const form = page.locator('[data-testid="preview-item"][data-component-type="contact_form"]');
+  await expect(text).toHaveCount(1);
+  await expect(form).toHaveCount(1);
+
+  const box = await form.boundingBox();
+  if (!box) throw new Error("Missing form bounding box");
+
+  // Drop in bottom half => insert after.
+  await text.dragTo(form, {
+    targetPosition: { x: Math.max(2, Math.floor(box.width / 2)), y: Math.max(2, Math.floor(box.height - 2)) },
+  });
+
+  const types = await page.getByTestId("preview-item").evaluateAll((els) => els.map((el) => el.getAttribute("data-component-type")));
+  expect(types[0]).toBe("contact_form");
+  expect(types[1]).toBe("rich_text");
+
+  const box2 = await form.boundingBox();
+  if (!box2) throw new Error("Missing form bounding box after reorder");
+
+  // Drop in top half => insert before.
+  await text.dragTo(form, { targetPosition: { x: Math.max(2, Math.floor(box2.width / 2)), y: 2 } });
+  const types2 = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types2[0]).toBe("rich_text");
+  expect(types2[1]).toBe("contact_form");
+
+  const dropzone = page.getByTestId("preview-dropzone").first();
+  await text.dragTo(dropzone);
+  const types3 = await page.getByTestId("preview-item").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("data-component-type"))
+  );
+  expect(types3[0]).toBe("contact_form");
+  expect(types3[1]).toBe("rich_text");
 });
 
 test("can duplicate and delete a component from Preview toolbar", async ({ page }) => {
