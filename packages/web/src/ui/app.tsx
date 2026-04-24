@@ -1766,7 +1766,7 @@ export function App() {
                           >
                             {isSaving ? "Saving..." : "Save page.json"}
                           </button>
-                          <button className="btn" data-testid="reload-page" onClick={() => void load()}>
+                          <button className="btn" data-testid="reload-page" onClick={() => void load()} disabled={isSaving}>
                             Reload
                           </button>
                         </div>
@@ -1804,11 +1804,15 @@ export function App() {
                             <span className="muted">Autosave</span>
                           </label>
                           {isAutosaving ? (
-                            <span className="badge">autosaving…</span>
+                            <span className="badge" data-testid="save-status">
+                              autosaving…
+                            </span>
                           ) : isDirty ? (
-                            <span className="badge">unsaved</span>
+                            <span className="badge" data-testid="save-status">
+                              unsaved
+                            </span>
                           ) : (
-                            <span className="badge" style={{ opacity: 0.8 }}>
+                            <span className="badge" data-testid="save-status" style={{ opacity: 0.8 }}>
                               saved
                             </span>
                           )}
@@ -4916,6 +4920,9 @@ function ImageEditorModal(props: {
   const [cropScale, setCropScale] = useState(0.82); // fraction of viewport
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [rotateDeg, setRotateDeg] = useState<0 | 90 | 180 | 270>(0);
+  const [flipH, setFlipH] = useState(false);
+  const [flipV, setFlipV] = useState(false);
   const [outputMaxPx, setOutputMaxPx] = useState(1600);
   const [format, setFormat] = useState<"image/webp" | "image/png" | "image/jpeg">("image/webp");
   const [quality, setQuality] = useState(0.9);
@@ -4939,11 +4946,14 @@ function ImageEditorModal(props: {
     const vw = viewport.w;
     const vh = viewport.h;
 
+    const effectiveNatural =
+      rotateDeg === 90 || rotateDeg === 270 ? { w: natural.h, h: natural.w } : { w: natural.w, h: natural.h };
+
     let desiredAspect: number | null = null;
     if (aspect === "1:1") desiredAspect = 1;
     if (aspect === "4:3") desiredAspect = 4 / 3;
     if (aspect === "16:9") desiredAspect = 16 / 9;
-    if (aspect === "original") desiredAspect = natural.w / natural.h;
+    if (aspect === "original") desiredAspect = effectiveNatural.w / effectiveNatural.h;
 
     const maxW = vw * cropScale;
     const maxH = vh * cropScale;
@@ -4961,11 +4971,11 @@ function ImageEditorModal(props: {
     const cx = (vw - cw) / 2;
     const cy = (vh - ch) / 2;
 
-    const baseScale = Math.max(cw / natural.w, ch / natural.h);
+    const baseScale = Math.max(cw / effectiveNatural.w, ch / effectiveNatural.h);
     const scale = baseScale * zoom;
 
-    const imgHalfW = (natural.w * scale) / 2;
-    const imgHalfH = (natural.h * scale) / 2;
+    const imgHalfW = (effectiveNatural.w * scale) / 2;
+    const imgHalfH = (effectiveNatural.h * scale) / 2;
 
     const minCenterX = cx + cw - imgHalfW;
     const maxCenterX = cx + imgHalfW;
@@ -4989,9 +4999,9 @@ function ImageEditorModal(props: {
       imgTop,
       vw,
       vh,
-      natural,
+      effectiveNatural,
     };
-  }, [aspect, cropScale, natural, offset.x, offset.y, viewport.h, viewport.w, zoom]);
+  }, [aspect, cropScale, natural, offset.x, offset.y, rotateDeg, viewport.h, viewport.w, zoom]);
 
   useEffect(() => {
     if (!computed) return;
@@ -5140,7 +5150,7 @@ function ImageEditorModal(props: {
   const renderToFile = useCallback(async (): Promise<File> => {
     if (!computed || !imgRef.current) throw new Error("Image is not ready yet.");
 
-    const { crop, imgLeft, imgTop, scale, natural: nat } = computed;
+    const { crop, imgLeft, imgTop, scale, effectiveNatural: nat } = computed;
     const sx = (crop.x - imgLeft) / scale;
     const sy = (crop.y - imgTop) / scale;
     const sw = crop.w / scale;
@@ -5160,6 +5170,22 @@ function ImageEditorModal(props: {
       outW = Math.max(1, Math.round(outH * ratio));
     }
 
+    const transformed = document.createElement("canvas");
+    transformed.width = nat.w;
+    transformed.height = nat.h;
+    const tctx = transformed.getContext("2d");
+    if (!tctx) throw new Error("Missing 2d context");
+
+    tctx.imageSmoothingEnabled = true;
+    tctx.imageSmoothingQuality = "high";
+    tctx.save();
+    tctx.translate(nat.w / 2, nat.h / 2);
+    tctx.rotate((rotateDeg * Math.PI) / 180);
+    tctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+    if (!natural) throw new Error("Missing image dimensions");
+    tctx.drawImage(imgRef.current, -natural.w / 2, -natural.h / 2, natural.w, natural.h);
+    tctx.restore();
+
     const canvas = document.createElement("canvas");
     canvas.width = outW;
     canvas.height = outH;
@@ -5168,7 +5194,7 @@ function ImageEditorModal(props: {
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(imgRef.current, clampedSx, clampedSy, clampedSw, clampedSh, 0, 0, outW, outH);
+    ctx.drawImage(transformed, clampedSx, clampedSy, clampedSw, clampedSh, 0, 0, outW, outH);
 
     const blob =
       (await canvasToBlob(canvas, format, format === "image/png" ? undefined : quality).catch(() => null)) ??
@@ -5178,7 +5204,7 @@ function ImageEditorModal(props: {
 
     const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
     return new File([blob], `edited.${ext}`, { type: blob.type });
-  }, [computed, format, outputMaxPx, quality]);
+  }, [computed, flipH, flipV, format, natural, outputMaxPx, quality, rotateDeg]);
 
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={() => onCancel()}>
@@ -5226,7 +5252,7 @@ function ImageEditorModal(props: {
                           position: "absolute",
                           left: "50%",
                           top: "50%",
-                          transform: `translate(-50%, -50%) translate(${computed.clampedOffset.x}px, ${computed.clampedOffset.y}px) scale(${computed.scale})`,
+                          transform: `translate(-50%, -50%) translate(${computed.clampedOffset.x}px, ${computed.clampedOffset.y}px) rotate(${rotateDeg}deg) scale(${computed.scale * (flipH ? -1 : 1)}, ${computed.scale * (flipV ? -1 : 1)})`,
                           transformOrigin: "center center",
                           willChange: "transform",
                           userSelect: "none",
@@ -5318,7 +5344,12 @@ function ImageEditorModal(props: {
               <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div className="field" style={{ minWidth: 160 }}>
                   <label>Aspect</label>
-                  <select value={aspect} onChange={(e) => setAspect(e.target.value)} disabled={!canEdit}>
+                  <select
+                    data-testid="image-editor-aspect"
+                    value={aspect}
+                    onChange={(e) => setAspect(e.target.value)}
+                    disabled={!canEdit}
+                  >
                     <option value="free">free</option>
                     <option value="original">original</option>
                     <option value="1:1">1:1</option>
@@ -5353,6 +5384,66 @@ function ImageEditorModal(props: {
                     disabled={!canEdit}
                     onChange={(e) => setCropScale(Number(e.target.value))}
                   />
+                </div>
+
+                <div className="field" style={{ minWidth: 230 }}>
+                  <label>Transform</label>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn"
+                      data-testid="image-editor-rotate-left"
+                      disabled={!canEdit}
+                      onClick={() => setRotateDeg((prev) => (prev === 0 ? 270 : prev === 90 ? 0 : prev === 180 ? 90 : 180))}
+                      title="Rotate left (90°)"
+                    >
+                      Rotate ↺
+                    </button>
+                    <button
+                      className="btn"
+                      data-testid="image-editor-rotate-right"
+                      disabled={!canEdit}
+                      onClick={() => setRotateDeg((prev) => (prev === 0 ? 90 : prev === 90 ? 180 : prev === 180 ? 270 : 0))}
+                      title="Rotate right (90°)"
+                    >
+                      Rotate ↻
+                    </button>
+                    <button
+                      className={flipH ? "btn btnPrimary" : "btn"}
+                      data-testid="image-editor-flip-h"
+                      disabled={!canEdit}
+                      onClick={() => setFlipH((v) => !v)}
+                      title="Flip horizontally"
+                    >
+                      Flip H
+                    </button>
+                    <button
+                      className={flipV ? "btn btnPrimary" : "btn"}
+                      data-testid="image-editor-flip-v"
+                      disabled={!canEdit}
+                      onClick={() => setFlipV((v) => !v)}
+                      title="Flip vertically"
+                    >
+                      Flip V
+                    </button>
+                    {rotateDeg !== 0 || flipH || flipV ? (
+                      <button
+                        className="btn"
+                        data-testid="image-editor-transform-reset"
+                        disabled={!canEdit}
+                        onClick={() => {
+                          setRotateDeg(0);
+                          setFlipH(false);
+                          setFlipV(false);
+                        }}
+                        title="Reset transform"
+                      >
+                        Reset
+                      </button>
+                    ) : null}
+                    <span className="badge" title="Rotation">
+                      {rotateDeg}°
+                    </span>
+                  </div>
                 </div>
 
                 <div className="field" style={{ width: 130 }}>

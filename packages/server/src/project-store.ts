@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PageSchema, type Page } from "@cac/shared";
 import { sanitizeRichTextHtml } from "./sanitize/rich-text.js";
@@ -14,6 +14,12 @@ export class ProjectStore {
 
   public constructor(dataDirAbs: string) {
     this.dataDirAbs = dataDirAbs;
+  }
+
+  private async writeFileAtomic(pathAbs: string, contents: string): Promise<void> {
+    const tmpPath = `${pathAbs}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await writeFile(tmpPath, contents, "utf8");
+    await rename(tmpPath, pathAbs);
   }
 
   private enqueuePageWrite<T>(projectId: string, work: () => Promise<T>): Promise<T> {
@@ -95,14 +101,14 @@ export class ProjectStore {
     const validated = this.sanitizePage(PageSchema.parse(page));
     await this.ensureProject(projectId);
     const pagePath = this.getPagePath(projectId);
-    await writeFile(pagePath, JSON.stringify(validated, null, 2) + "\n", "utf8");
+    await this.writeFileAtomic(pagePath, JSON.stringify(validated, null, 2) + "\n");
   }
 
   private async writePageWithEtagUnlocked(projectId: string, page: Page): Promise<string> {
     const validated = this.sanitizePage(PageSchema.parse(page));
     await this.ensureProject(projectId);
     const pagePath = this.getPagePath(projectId);
-    await writeFile(pagePath, JSON.stringify(validated, null, 2) + "\n", "utf8");
+    await this.writeFileAtomic(pagePath, JSON.stringify(validated, null, 2) + "\n");
     const s = await stat(pagePath);
     return this.createWeakEtag({ mtimeMs: s.mtimeMs, size: s.size });
   }

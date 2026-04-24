@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Gd0sAAAAASUVORK5CYII=";
+const PNG_2X1_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8DwHwQBEPgD/U6VwW8AAAAASUVORK5CYII=";
 const PNG_2X2_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwHwyBNBAw/AcAR8oI+ItOQ4UAAAAASUVORK5CYII=";
 
@@ -49,6 +51,18 @@ async function ensurePaletteTab(
   await expect(title).toHaveText(desiredTitle);
 }
 
+async function saveAndWait(page: import("@playwright/test").Page) {
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await expect(page.getByTestId("save-status")).toHaveText("saved");
+}
+
+async function saveAndReload(page: import("@playwright/test").Page) {
+  await saveAndWait(page);
+  await page.getByTestId("reload-page").click();
+  await expect(page.getByTestId("load-state")).toHaveText("ready");
+}
+
 test("editor can add content, upload image, save and reload", async ({ page }) => {
   await page.goto("/");
 
@@ -68,9 +82,7 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
 
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.locator("text=Design. Compose. Publish.")).toBeVisible();
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
@@ -144,9 +156,7 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   expect(types[0]).toBe("rich_text");
   expect(types[1]).toBe("hero");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.getByTestId("preview-item")).toHaveCount(2);
   const typesAfter = await page.getByTestId("preview-item").evaluateAll((els) =>
@@ -202,9 +212,7 @@ test("components can be moved across sections via drag and drop in Preview", asy
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 });
@@ -284,9 +292,7 @@ test("components can be reordered via drag and drop within a section (Inspector 
     .poll(async () => await page.getByTestId("preview-item").first().getAttribute("data-component-type"))
     .toBe("contact_form");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
   await expect
     .poll(async () => await page.getByTestId("preview-item").first().getAttribute("data-component-type"))
     .toBe("contact_form");
@@ -308,9 +314,7 @@ test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.keyboard.press("Control+A");
   await page.keyboard.type("Hello from inline hero");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.locator(".hero h1")).toContainText("Hello from inline hero");
 });
@@ -341,9 +345,7 @@ test("section style (background + padding) persists", async ({ page }) => {
   const pad = await section.evaluate((el) => getComputedStyle(el).paddingTop);
   expect(pad).toBe("24px");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   const bgAfter = await section.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(bgAfter).toBe("rgb(255, 0, 0)");
@@ -367,9 +369,7 @@ test("section visibility hides in Preview and export", async ({ page }) => {
   await expect(page.locator("text=Design. Compose. Publish.")).toHaveCount(0);
   await expect(page.getByTestId("preview-section")).toHaveCount(1);
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.locator("text=Design. Compose. Publish.")).toHaveCount(0);
   await expect(page.getByTestId("preview-section")).toHaveCount(1);
@@ -399,9 +399,7 @@ test("section label can be renamed from Structure and persists", async ({ page }
   await page.getByTestId("section-label-input").press("Enter");
   await expect(sectionCard).toContainText("Above the fold");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.getByTestId("structure-section-card").first()).toContainText("Above the fold");
 });
@@ -471,18 +469,14 @@ test("can duplicate and delete a component from Preview toolbar", async ({ page 
   await page.getByTestId("preview-duplicate").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(2);
 
   await heroItem.first().click();
   await page.getByTestId("preview-delete").click();
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
 });
 
@@ -504,9 +498,7 @@ test("rich text can be edited inline in Preview and persists", async ({ page }) 
   await page.keyboard.type("Hello inline editor");
 
   // Blur to trigger sanitization + model update.
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await expect(page.locator(".richText")).toContainText("Hello inline editor");
 });
@@ -533,9 +525,7 @@ test("rich text formatting toolbar can bold selection and persists", async ({ pa
   await page.getByTestId("richtext-bold").click();
 
   // Blur + persist.
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   const pageJson = (await fetchPageJson(page, projectId)) as {
     sections: Array<{ components: Array<{ type: string; html?: string }> }>;
@@ -574,9 +564,7 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   const afterReplace = await img.getAttribute("src");
   if (!afterReplace) throw new Error("missing img src after replace");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
   await expect(page.locator(".imageBlock img")).toHaveAttribute("src", afterReplace);
 });
@@ -595,8 +583,7 @@ test("asset file can be replaced (keeps same asset id)", async ({ page }) => {
   });
 
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
+  await saveAndWait(page);
   await ensurePaletteTab(page, "images");
 
   type RawImageAsset = { type: "image"; id: string; width: number | null; height: number | null; filename: string };
@@ -698,6 +685,44 @@ test("image editor supports crop resize handles + keyboard nudges", async ({ pag
   expect(afterScale).toBeLessThan(beforeScale);
 });
 
+test("image editor rotate swaps output aspect", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_img_rotate_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "images");
+  await page.getByTestId("upload-image").setInputFiles({
+    name: "wide.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_2X1_BASE64, "base64"),
+  });
+
+  await expect(page.getByTestId("asset-edit-btn").first()).toBeVisible();
+  await saveAndWait(page);
+  await ensurePaletteTab(page, "images");
+  await expect(page.getByTestId("asset-edit-btn").first()).toBeVisible();
+
+  await page.getByTestId("asset-edit-btn").first().click();
+  await expect(page.getByTestId("image-editor-viewport")).toBeVisible();
+
+  await page.getByTestId("image-editor-rotate-right").click();
+  await page.getByTestId("image-editor-aspect").selectOption("original");
+
+  await page.getByRole("button", { name: "Save as new asset" }).click();
+  await expect(page.locator('[data-testid="image-editor-viewport"]')).toHaveCount(0);
+  await saveAndWait(page);
+
+  await expect
+    .poll(async () => {
+      const p = (await fetchPageJson(page, projectId)) as { assets?: Array<{ type: string; width: number | null; height: number | null }> };
+      const images = (p.assets ?? []).filter((a) => a.type === "image");
+      const rotated = images.find((a) => typeof a.width === "number" && typeof a.height === "number" && a.width > 0 && a.height > 0 && a.width < a.height);
+      return rotated ? { w: rotated.width, h: rotated.height } : null;
+    })
+    .not.toBeNull();
+});
+
 test("image style (radius + max width) persists", async ({ page }) => {
   await page.goto("/");
 
@@ -733,9 +758,7 @@ test("image style (radius + max width) persists", async ({ page }) => {
   const radius = await page.locator(".imageBlock img").first().evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
   expect(radius).toBe("20px");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await page.getByTestId("reload-page").click();
+  await saveAndReload(page);
 
   await page.locator('[data-testid="preview-item"][data-component-type="image"]').click();
   const maxWidthAfter = await block.evaluate((el) => getComputedStyle(el).maxWidth);
@@ -759,8 +782,7 @@ test("page theme affects Preview and export CSS vars", async ({ page }) => {
   const bg = await cta.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(bg).toBe("rgb(255, 0, 0)");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
+  await saveAndWait(page);
   await page.getByTestId("export-site").click();
   await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
 
@@ -815,10 +837,7 @@ test("exported HTML includes section + image styles", async ({ page }) => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "20");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await expect(page.getByTestId("save-page")).toBeEnabled();
-  await expect(page.getByTestId("save-page")).toHaveText("Save page.json");
+  await saveAndWait(page);
   await page.getByTestId("export-site").click();
 
   await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
@@ -873,9 +892,7 @@ test("exported HTML includes component box styles", async ({ page }) => {
   await formItem.click();
   await page.getByTestId("component-style-align").selectOption("center");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
-  await expect(page.getByTestId("save-page")).toBeEnabled();
+  await saveAndWait(page);
   await page.getByTestId("export-site").click();
 
   await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
@@ -957,8 +974,7 @@ test("exported HTML includes gradients and button styles", async ({ page }) => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "6");
 
-  await ensurePaletteTab(page, "project");
-  await page.getByTestId("save-page").click();
+  await saveAndWait(page);
   await page.getByTestId("export-site").click();
 
   await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
