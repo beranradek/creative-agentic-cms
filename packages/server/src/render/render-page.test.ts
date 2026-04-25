@@ -64,6 +64,38 @@ describe("renderPageHtml", () => {
     expect(html).toContain('<script id="analytics">console.log("x")</script>');
   });
 
+  it("renders contact form submit config (disabled/netlify/custom)", () => {
+    const basePage = PageSchema.parse({
+      version: 1,
+      metadata: { title: "t", description: "d", lang: "en" },
+      assets: [],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: {},
+          components: [{ id: "c1", type: "contact_form", headline: "Contact", submitLabel: "Send" }],
+        },
+      ],
+    });
+
+    const disabled = renderPageHtml(basePage).html;
+    expect(disabled).toContain('onsubmit="return false;"');
+
+    const netlify = renderPageHtml(basePage, { contactForm: { mode: "netlify", actionUrl: null, netlifyFormName: "contact", successRedirectUrl: "/thanks" } })
+      .html;
+    expect(netlify).toContain('data-netlify="true"');
+    expect(netlify).toContain('name="contact"');
+    expect(netlify).toContain('action="/thanks"');
+    expect(netlify).toContain('name="form-name" value="contact"');
+
+    const custom = renderPageHtml(basePage, { contactForm: { mode: "custom", actionUrl: "https://example.com/submit", netlifyFormName: null, successRedirectUrl: null } })
+      .html;
+    expect(custom).toContain('action="https://example.com/submit"');
+    expect(custom).not.toContain('onsubmit="return false;"');
+  });
+
   it("renders image focal point via object-position", () => {
     const page = PageSchema.parse({
       version: 1,

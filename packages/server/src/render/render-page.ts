@@ -2,6 +2,19 @@ import { resolveTheme, resolvedThemeToCssVars, type Asset, type Component, type 
 import { normalizeBaseUrl } from "../export-config.js";
 import { sanitizeRichTextHtml } from "../sanitize/rich-text.js";
 
+type ContactFormExportConfig = {
+  mode: "disabled" | "formspree" | "netlify" | "custom";
+  actionUrl: string | null;
+  netlifyFormName: string | null;
+  successRedirectUrl: string | null;
+};
+
+type RenderPageOptions = {
+  baseUrl?: string | null;
+  analyticsHtml?: string | null;
+  contactForm?: ContactFormExportConfig;
+};
+
 function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
@@ -75,7 +88,7 @@ function renderButtonStyle(style: {
   return styles.join("");
 }
 
-function renderComponent(component: Component, assetsById: Map<string, Asset>): string {
+function renderComponent(component: Component, assetsById: Map<string, Asset>, options?: RenderPageOptions): string {
   if (component.type === "hero") {
     const bgAsset =
       component.backgroundImageAssetId && component.backgroundImageAssetId.length
@@ -145,10 +158,34 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const styleAttr = boxStyle ? ` style="${boxStyle}"` : "";
     const justify = renderButtonJustify(component.style.textAlign);
     const submitStyle = renderButtonStyle(component.submitStyle);
+    const cfg: ContactFormExportConfig = {
+      mode: options?.contactForm?.mode ?? "disabled",
+      actionUrl: options?.contactForm?.actionUrl ?? null,
+      netlifyFormName: options?.contactForm?.netlifyFormName ?? null,
+      successRedirectUrl: options?.contactForm?.successRedirectUrl ?? null,
+    };
+
+    let formAttrs = `method="post"`;
+    let honeypot = "";
+    let hidden = "";
+    if (cfg.mode === "disabled") {
+      formAttrs += ` action="#" onsubmit="return false;"`;
+    } else if (cfg.mode === "netlify") {
+      const name = cfg.netlifyFormName ?? "contact";
+      formAttrs += ` data-netlify="true" netlify-honeypot="bot-field" name="${escapeHtml(name)}"`;
+      if (cfg.successRedirectUrl) formAttrs += ` action="${escapeHtml(cfg.successRedirectUrl)}"`;
+      hidden += `<input type="hidden" name="form-name" value="${escapeHtml(name)}" />`;
+      honeypot = `<p style="display:none;"><label>Don’t fill this out: <input name="bot-field" /></label></p>`;
+    } else {
+      const action = cfg.actionUrl ?? "#";
+      formAttrs += ` action="${escapeHtml(action)}"`;
+    }
     return `
       <div class="contactForm" id="contact"${styleAttr}>
         <h3>${escapeHtml(component.headline)}</h3>
-        <form method="post" action="#" onsubmit="return false;">
+        <form ${formAttrs}>
+          ${honeypot}
+          ${hidden}
           <div class="field">
             <label>Name</label>
             <input name="name" />
@@ -170,7 +207,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
   return "";
 }
 
-function renderSection(section: Section, assetsById: Map<string, Asset>): string {
+function renderSection(section: Section, assetsById: Map<string, Asset>, options?: RenderPageOptions): string {
   if (!section.settings.visible) return "";
 
   const styles: string[] = [];
@@ -203,7 +240,7 @@ function renderSection(section: Section, assetsById: Map<string, Asset>): string
   }
   const innerStyleAttr = innerStyles.length ? ` style="${innerStyles.join("")}"` : "";
 
-  const inner = section.components.map((c) => renderComponent(c, assetsById)).join("\n");
+  const inner = section.components.map((c) => renderComponent(c, assetsById, options)).join("\n");
   return `<section class="section"${styleAttr}>
 <div class="sectionInner"${innerStyleAttr}>
 ${inner}
@@ -213,7 +250,7 @@ ${inner}
 
 export function renderPageHtml(
   page: Page,
-  options?: { baseUrl?: string | null; analyticsHtml?: string | null }
+  options?: RenderPageOptions
 ): { html: string; css: string } {
   const resolvedTheme = resolveTheme(page.theme);
   const cssVars = resolvedThemeToCssVars(resolvedTheme);
@@ -251,7 +288,7 @@ export function renderPageHtml(
 
   const assetsById = new Map(page.assets.map((a) => [a.id, a]));
 
-  const body = page.sections.map((s) => renderSection(s, assetsById)).join("\n");
+  const body = page.sections.map((s) => renderSection(s, assetsById, options)).join("\n");
 
   const normalizedBaseUrl =
     options?.baseUrl && typeof options.baseUrl === "string" && options.baseUrl.trim() ? normalizeBaseUrl(options.baseUrl) : null;

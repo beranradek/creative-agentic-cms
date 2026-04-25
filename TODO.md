@@ -107,7 +107,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Per-project export config (base URL, analytics, robots, sitemap).
   - [x] SEO metadata completeness (title/description + OG/Twitter tags).
 - [ ] Contact form:
-  - [ ] Pluggable submit (Formspree / Netlify forms / custom endpoint).
+  - [x] Pluggable submit (Formspree / Netlify forms / custom endpoint).
 
 ## Milestone 8 — Testing & Automation
 

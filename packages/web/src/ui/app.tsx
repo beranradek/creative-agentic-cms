@@ -515,6 +515,14 @@ const ExportConfigSchema = z.object({
   includeRobotsTxt: z.boolean().default(true),
   allowIndexing: z.boolean().default(true),
   analyticsHtml: z.string().max(20_000).nullable().default(null),
+  contactForm: z
+    .object({
+      mode: z.enum(["disabled", "formspree", "netlify", "custom"]).default("disabled"),
+      actionUrl: z.string().url().nullable().default(null),
+      netlifyFormName: z.string().min(1).nullable().default(null),
+      successRedirectUrl: z.string().url().nullable().default(null),
+    })
+    .default({}),
 });
 
 type ExportConfig = z.infer<typeof ExportConfigSchema>;
@@ -863,6 +871,9 @@ export function App() {
   const [exportConfigError, setExportConfigError] = useState<string | null>(null);
   const [exportBaseUrlInput, setExportBaseUrlInput] = useState("");
   const [exportAnalyticsHtmlInput, setExportAnalyticsHtmlInput] = useState("");
+  const [exportContactActionUrlInput, setExportContactActionUrlInput] = useState("");
+  const [exportContactNetlifyNameInput, setExportContactNetlifyNameInput] = useState("");
+  const [exportContactSuccessRedirectInput, setExportContactSuccessRedirectInput] = useState("");
   const [isSavingExportConfig, setIsSavingExportConfig] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -977,6 +988,9 @@ export function App() {
     if (!exportConfig) return;
     setExportBaseUrlInput(exportConfig.baseUrl ?? "");
     setExportAnalyticsHtmlInput(exportConfig.analyticsHtml ?? "");
+    setExportContactActionUrlInput(exportConfig.contactForm.actionUrl ?? "");
+    setExportContactNetlifyNameInput(exportConfig.contactForm.netlifyFormName ?? "");
+    setExportContactSuccessRedirectInput(exportConfig.contactForm.successRedirectUrl ?? "");
   }, [exportConfig]);
 
   const flushAutosaveTimer = useCallback(() => {
@@ -1606,7 +1620,34 @@ export function App() {
     try {
       const baseUrl = exportBaseUrlInput.trim() ? exportBaseUrlInput.trim() : null;
       const analyticsHtml = exportAnalyticsHtmlInput.trim() ? exportAnalyticsHtmlInput.trim() : null;
-      const next = ExportConfigSchema.parse({ ...exportConfig, baseUrl, analyticsHtml });
+      const contactMode = exportConfig.contactForm.mode;
+      const actionUrlRaw = exportContactActionUrlInput.trim();
+      const netlifyNameRaw = exportContactNetlifyNameInput.trim();
+      const redirectRaw = exportContactSuccessRedirectInput.trim();
+
+      let contactForm: ExportConfig["contactForm"] = { ...exportConfig.contactForm };
+      if (contactMode === "disabled") {
+        contactForm = { mode: "disabled", actionUrl: null, netlifyFormName: null, successRedirectUrl: null };
+      } else if (contactMode === "netlify") {
+        contactForm = {
+          mode: "netlify",
+          actionUrl: null,
+          netlifyFormName: netlifyNameRaw || "contact",
+          successRedirectUrl: redirectRaw || null,
+        };
+      } else {
+        if (!actionUrlRaw) {
+          throw new Error("Contact form action URL is required for Formspree/Custom modes.");
+        }
+        contactForm = {
+          mode: contactMode,
+          actionUrl: actionUrlRaw,
+          netlifyFormName: null,
+          successRedirectUrl: null,
+        };
+      }
+
+      const next = ExportConfigSchema.parse({ ...exportConfig, baseUrl, analyticsHtml, contactForm });
       const saved = await apiPutExportConfig(activeProjectId, next);
       setExportConfig(saved);
       toast.success("Saved export settings", `projects/${activeProjectId}/export.json`);
@@ -1617,7 +1658,16 @@ export function App() {
     } finally {
       setIsSavingExportConfig(false);
     }
-  }, [activeProjectId, exportAnalyticsHtmlInput, exportBaseUrlInput, exportConfig, toast]);
+  }, [
+    activeProjectId,
+    exportAnalyticsHtmlInput,
+    exportBaseUrlInput,
+    exportConfig,
+    exportContactActionUrlInput,
+    exportContactNetlifyNameInput,
+    exportContactSuccessRedirectInput,
+    toast,
+  ]);
 
   const exportProject = useCallback(async () => {
     if (!page) return;
@@ -1990,6 +2040,72 @@ export function App() {
                                 />
                                 <div className="muted">Injected into the exported HTML head.</div>
                               </div>
+
+                              <div className="field">
+                                <label>Contact form submit</label>
+                                <select
+                                  data-testid="export-config-contact-mode"
+                                  value={exportConfig.contactForm.mode}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => {
+                                    const mode =
+                                      e.target.value === "formspree"
+                                        ? "formspree"
+                                        : e.target.value === "netlify"
+                                          ? "netlify"
+                                          : e.target.value === "custom"
+                                            ? "custom"
+                                            : "disabled";
+                                    setExportConfig((prev) => (prev ? { ...prev, contactForm: { ...prev.contactForm, mode } } : prev));
+                                  }}
+                                >
+                                  <option value="disabled">disabled (no submit)</option>
+                                  <option value="netlify">Netlify Forms</option>
+                                  <option value="formspree">Formspree</option>
+                                  <option value="custom">Custom endpoint</option>
+                                </select>
+                                <div className="muted">
+                                  This affects the exported static site only (not the editor preview).
+                                </div>
+                              </div>
+
+                              {exportConfig.contactForm.mode === "netlify" ? (
+                                <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                                  <div className="field" style={{ minWidth: 240, flex: 1 }}>
+                                    <label>Netlify form name</label>
+                                    <input
+                                      data-testid="export-config-contact-netlify-name"
+                                      value={exportContactNetlifyNameInput}
+                                      disabled={!canEdit || isSavingExportConfig || isSaving}
+                                      onChange={(e) => setExportContactNetlifyNameInput(e.target.value)}
+                                      placeholder="contact"
+                                    />
+                                  </div>
+                                  <div className="field" style={{ minWidth: 320, flex: 2 }}>
+                                    <label>Success redirect (optional)</label>
+                                    <input
+                                      data-testid="export-config-contact-netlify-redirect"
+                                      value={exportContactSuccessRedirectInput}
+                                      disabled={!canEdit || isSavingExportConfig || isSaving}
+                                      onChange={(e) => setExportContactSuccessRedirectInput(e.target.value)}
+                                      placeholder="/thanks"
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {exportConfig.contactForm.mode === "formspree" || exportConfig.contactForm.mode === "custom" ? (
+                                <div className="field">
+                                  <label>Action URL</label>
+                                  <input
+                                    data-testid="export-config-contact-action"
+                                    value={exportContactActionUrlInput}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) => setExportContactActionUrlInput(e.target.value)}
+                                    placeholder="https://example.com/submit"
+                                  />
+                                </div>
+                              ) : null}
 
                               <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                                 <button

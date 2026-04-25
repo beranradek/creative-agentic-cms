@@ -7,6 +7,14 @@ export const ExportConfigSchema = z
     includeRobotsTxt: z.boolean().default(true),
     allowIndexing: z.boolean().default(true),
     analyticsHtml: z.string().max(20_000).nullable().default(null),
+    contactForm: z
+      .object({
+        mode: z.enum(["disabled", "formspree", "netlify", "custom"]).default("disabled"),
+        actionUrl: z.string().url().nullable().default(null),
+        netlifyFormName: z.string().min(1).nullable().default(null),
+        successRedirectUrl: z.string().url().nullable().default(null),
+      })
+      .default({}),
   })
   .default({});
 
@@ -16,4 +24,3 @@ export function normalizeBaseUrl(input: string): string {
   const trimmed = input.trim();
   return trimmed.replace(/\/+$/, "");
 }
-

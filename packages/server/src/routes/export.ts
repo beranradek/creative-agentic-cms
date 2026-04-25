@@ -21,7 +21,11 @@ export function createExportRouter(options: CreateExportRouterOptions): express.
 
     const page = await store.readPage(projectId);
     const exportConfig = await store.readExportConfig(projectId);
-    const { html, css } = renderPageHtml(page, { baseUrl: exportConfig.baseUrl, analyticsHtml: exportConfig.analyticsHtml });
+    const { html, css } = renderPageHtml(page, {
+      baseUrl: exportConfig.baseUrl,
+      analyticsHtml: exportConfig.analyticsHtml,
+      contactForm: exportConfig.contactForm,
+    });
 
     const outputDir = path.join(store.getProjectDir(projectId), "output");
     const outputAssetsDir = path.join(outputDir, "assets");
