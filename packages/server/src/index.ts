@@ -10,6 +10,7 @@ import { ProjectStore } from "./project-store.js";
 import { createAssetRouter } from "./routes/assets.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createExportRouter } from "./routes/export.js";
+import { createExportConfigRouter } from "./routes/export-config.js";
 import { createPreviewRouter } from "./routes/preview.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -113,6 +114,7 @@ app.put("/api/projects/:projectId/page", async (req, res) => {
 
 app.use("/api/projects/:projectId/assets", createAssetRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/agent", createAgentRouter({ store, projectIdSchema: ProjectIdSchema }));
+app.use("/api/projects/:projectId/export-config", createExportConfigRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/export", createExportRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/preview", createPreviewRouter({ store, projectIdSchema: ProjectIdSchema }));
 

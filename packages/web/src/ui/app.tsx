@@ -509,6 +509,36 @@ async function apiPutPage(
   return getEtagHeader(res);
 }
 
+const ExportConfigSchema = z.object({
+  baseUrl: z.string().url().nullable().default(null),
+  includeSitemap: z.boolean().default(true),
+  includeRobotsTxt: z.boolean().default(true),
+  allowIndexing: z.boolean().default(true),
+  analyticsHtml: z.string().max(20_000).nullable().default(null),
+});
+
+type ExportConfig = z.infer<typeof ExportConfigSchema>;
+
+async function apiGetExportConfig(projectId: string): Promise<ExportConfig> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`);
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) throw new Error(`Failed to load export config (${res.status})`);
+  const config = (json as { config?: unknown }).config;
+  return ExportConfigSchema.parse(config);
+}
+
+async function apiPutExportConfig(projectId: string, config: ExportConfig): Promise<ExportConfig> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) throw new Error(`Failed to save export config (${res.status})`);
+  const next = (json as { config?: unknown }).config;
+  return ExportConfigSchema.parse(next);
+}
+
 const DiffSummarySchema = z.object({
   sections: z.object({
     added: z.number().int().nonnegative(),
@@ -829,6 +859,11 @@ export function App() {
   const [agentProposalBaseEtag, setAgentProposalBaseEtag] = useState<string | null>(null);
   const [agentDiffSummary, setAgentDiffSummary] = useState<DiffSummary | null>(null);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
+  const [exportConfig, setExportConfig] = useState<ExportConfig | null>(null);
+  const [exportConfigError, setExportConfigError] = useState<string | null>(null);
+  const [exportBaseUrlInput, setExportBaseUrlInput] = useState("");
+  const [exportAnalyticsHtmlInput, setExportAnalyticsHtmlInput] = useState("");
+  const [isSavingExportConfig, setIsSavingExportConfig] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
@@ -883,6 +918,8 @@ export function App() {
     const effectiveProjectId = projectIdOverride ?? projectId;
     if (projectIdOverride && projectIdOverride !== projectId) setProjectId(projectIdOverride);
     setState({ kind: "loading" });
+    setExportConfig(null);
+    setExportConfigError(null);
     try {
       const next = await apiGetPage(effectiveProjectId);
       pageEtagRef.current = next.etag;
@@ -902,10 +939,23 @@ export function App() {
       setAgentProposalMessage(null);
       setAgentProposalBaseEtag(null);
       setAgentDiffSummary(null);
+      void (async () => {
+        try {
+          const cfg = await apiGetExportConfig(effectiveProjectId);
+          setExportConfig(cfg);
+          setExportConfigError(null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setExportConfig(ExportConfigSchema.parse({}));
+          setExportConfigError(message);
+        }
+      })();
       void refreshProjects();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setState({ kind: "error", message });
+      setExportConfig(null);
+      setExportConfigError(message);
       toast.error("Failed to load project", message);
     }
   }, [pageEtagRef, projectId, refreshProjects, toast]);
@@ -922,6 +972,12 @@ export function App() {
     latestPageRef.current = page;
     latestPageJsonRef.current = pageJson;
   }, [page, pageJson]);
+
+  useEffect(() => {
+    if (!exportConfig) return;
+    setExportBaseUrlInput(exportConfig.baseUrl ?? "");
+    setExportAnalyticsHtmlInput(exportConfig.analyticsHtml ?? "");
+  }, [exportConfig]);
 
   const flushAutosaveTimer = useCallback(() => {
     autosaveTokenRef.current += 1;
@@ -1543,6 +1599,26 @@ export function App() {
     updatePage,
   ]);
 
+  const saveExportConfig = useCallback(async () => {
+    if (!exportConfig) return;
+    setIsSavingExportConfig(true);
+    setExportConfigError(null);
+    try {
+      const baseUrl = exportBaseUrlInput.trim() ? exportBaseUrlInput.trim() : null;
+      const analyticsHtml = exportAnalyticsHtmlInput.trim() ? exportAnalyticsHtmlInput.trim() : null;
+      const next = ExportConfigSchema.parse({ ...exportConfig, baseUrl, analyticsHtml });
+      const saved = await apiPutExportConfig(activeProjectId, next);
+      setExportConfig(saved);
+      toast.success("Saved export settings", `projects/${activeProjectId}/export.json`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setExportConfigError(message);
+      toast.error("Failed to save export settings", message);
+    } finally {
+      setIsSavingExportConfig(false);
+    }
+  }, [activeProjectId, exportAnalyticsHtmlInput, exportBaseUrlInput, exportConfig, toast]);
+
   const exportProject = useCallback(async () => {
     if (!page) return;
     setIsExporting(true);
@@ -1843,6 +1919,93 @@ export function App() {
                           >
                             {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
                           </button>
+                        </div>
+                        <div className="card" style={{ marginTop: 10 }}>
+                          <div className="cardTitle">Export settings</div>
+                          {exportConfigError ? (
+                            <div className="errorBox" style={{ marginTop: 10 }}>
+                              <div className="errorBoxTitle">Export config error</div>
+                              <div>{exportConfigError}</div>
+                            </div>
+                          ) : null}
+                          {exportConfig ? (
+                            <div className="stack" style={{ gap: 10 }}>
+                              <div className="field">
+                                <label>Base URL</label>
+                                <input
+                                  data-testid="export-config-baseurl"
+                                  value={exportBaseUrlInput}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => setExportBaseUrlInput(e.target.value)}
+                                  placeholder="https://example.com"
+                                />
+                                <div className="muted">
+                                  Used for canonical + og:url in exported HTML, and for generating <code>sitemap.xml</code> / <code>robots.txt</code>.
+                                </div>
+                              </div>
+
+                              <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.includeRobotsTxt}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) =>
+                                      setExportConfig((prev) => (prev ? { ...prev, includeRobotsTxt: e.target.checked } : prev))
+                                    }
+                                  />
+                                  <span className="muted">robots.txt</span>
+                                </label>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.allowIndexing}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) => setExportConfig((prev) => (prev ? { ...prev, allowIndexing: e.target.checked } : prev))}
+                                  />
+                                  <span className="muted">Allow indexing</span>
+                                </label>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.includeSitemap}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) =>
+                                      setExportConfig((prev) => (prev ? { ...prev, includeSitemap: e.target.checked } : prev))
+                                    }
+                                  />
+                                  <span className="muted">sitemap.xml (requires Base URL)</span>
+                                </label>
+                              </div>
+
+                              <div className="field">
+                                <label>Analytics (raw HTML)</label>
+                                <textarea
+                                  rows={4}
+                                  data-testid="export-config-analytics"
+                                  value={exportAnalyticsHtmlInput}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => setExportAnalyticsHtmlInput(e.target.value)}
+                                  placeholder='Example: <script defer src="..."></script>'
+                                />
+                                <div className="muted">Injected into the exported HTML head.</div>
+                              </div>
+
+                              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                                <button
+                                  className="btn"
+                                  data-testid="export-config-save"
+                                  disabled={!canEdit || isSavingExportConfig || isSaving || !exportConfig}
+                                  onClick={() => void saveExportConfig()}
+                                >
+                                  {isSavingExportConfig ? "Saving..." : "Save export settings"}
+                                </button>
+                                <div className="muted">Stored as <code>projects/&lt;id&gt;/export.json</code>.</div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="muted">Loading export settings…</div>
+                          )}
                         </div>
                         {exportError ? (
                           <div className="errorBox" style={{ marginTop: 10 }}>

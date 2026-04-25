@@ -39,6 +39,31 @@ describe("renderPageHtml", () => {
     expect(html).toContain('name="twitter:image" content="assets/hero.png"');
   });
 
+  it("includes canonical + og:url when baseUrl is provided (and injects analytics HTML)", () => {
+    const page = PageSchema.parse({
+      version: 1,
+      metadata: { title: "t", description: "d", lang: "en" },
+      assets: [],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: {},
+          components: [{ id: "c1", type: "hero", headline: "Hello", subheadline: "World" }],
+        },
+      ],
+    });
+
+    const { html } = renderPageHtml(page, {
+      baseUrl: "https://example.com/site/",
+      analyticsHtml: '<script id="analytics">console.log("x")</script>',
+    });
+    expect(html).toContain('<link rel="canonical" href="https://example.com/site/" />');
+    expect(html).toContain('property="og:url" content="https://example.com/site/"');
+    expect(html).toContain('<script id="analytics">console.log("x")</script>');
+  });
+
   it("renders image focal point via object-position", () => {
     const page = PageSchema.parse({
       version: 1,

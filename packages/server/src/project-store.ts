@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PageSchema, type Page } from "@cac/shared";
+import { ExportConfigSchema, type ExportConfig } from "./export-config.js";
 import { sanitizeRichTextHtml } from "./sanitize/rich-text.js";
 
 export type PageWithEtag = { page: Page; etag: string };
@@ -169,5 +170,35 @@ export class ProjectStore {
 
   public getPagePath(projectId: string): string {
     return path.join(this.getProjectDir(projectId), "page.json");
+  }
+
+  public getExportConfigPath(projectId: string): string {
+    return path.join(this.getProjectDir(projectId), "export.json");
+  }
+
+  public async readExportConfig(projectId: string): Promise<ExportConfig> {
+    const configPath = this.getExportConfigPath(projectId);
+    try {
+      const raw = await readFile(configPath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      return ExportConfigSchema.parse(parsed);
+    } catch (error) {
+      const isMissing =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: string }).code === "ENOENT";
+      if (isMissing) return ExportConfigSchema.parse({});
+      // Invalid JSON or other read error: fall back to defaults.
+      return ExportConfigSchema.parse({});
+    }
+  }
+
+  public async writeExportConfig(projectId: string, input: unknown): Promise<ExportConfig> {
+    const config = ExportConfigSchema.parse(input);
+    await this.ensureProject(projectId);
+    const configPath = this.getExportConfigPath(projectId);
+    await this.writeFileAtomic(configPath, JSON.stringify(config, null, 2) + "\n");
+    return config;
   }
 }

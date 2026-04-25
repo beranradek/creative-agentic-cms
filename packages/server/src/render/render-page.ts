@@ -1,4 +1,5 @@
 import { resolveTheme, resolvedThemeToCssVars, type Asset, type Component, type Page, type Section } from "@cac/shared";
+import { normalizeBaseUrl } from "../export-config.js";
 import { sanitizeRichTextHtml } from "../sanitize/rich-text.js";
 
 function escapeHtml(text: string): string {
@@ -210,7 +211,10 @@ ${inner}
 </section>`;
 }
 
-export function renderPageHtml(page: Page): { html: string; css: string } {
+export function renderPageHtml(
+  page: Page,
+  options?: { baseUrl?: string | null; analyticsHtml?: string | null }
+): { html: string; css: string } {
   const resolvedTheme = resolveTheme(page.theme);
   const cssVars = resolvedThemeToCssVars(resolvedTheme);
   const cssVarBlock = Object.entries(cssVars)
@@ -248,6 +252,10 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
   const assetsById = new Map(page.assets.map((a) => [a.id, a]));
 
   const body = page.sections.map((s) => renderSection(s, assetsById)).join("\n");
+
+  const normalizedBaseUrl =
+    options?.baseUrl && typeof options.baseUrl === "string" && options.baseUrl.trim() ? normalizeBaseUrl(options.baseUrl) : null;
+  const canonicalUrl = normalizedBaseUrl ? normalizedBaseUrl + "/" : null;
 
   let ogImage:
     | null
@@ -302,6 +310,7 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
 
   const socialMeta: string[] = [];
   socialMeta.push(`<meta property="og:type" content="website" />`);
+  if (canonicalUrl) socialMeta.push(`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`);
   socialMeta.push(`<meta property="og:title" content="${escapeHtml(page.metadata.title)}" />`);
   socialMeta.push(`<meta property="og:description" content="${escapeHtml(page.metadata.description)}" />`);
   if (ogImage) {
@@ -315,6 +324,11 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
   socialMeta.push(`<meta name="twitter:description" content="${escapeHtml(page.metadata.description)}" />`);
   if (ogImage) socialMeta.push(`<meta name="twitter:image" content="assets/${escapeHtml(ogImage.filename)}" />`);
 
+  const analyticsHtml =
+    options?.analyticsHtml && typeof options.analyticsHtml === "string" && options.analyticsHtml.trim()
+      ? options.analyticsHtml.trim()
+      : null;
+
   const html = `<!doctype html>
 <html lang="${escapeHtml(page.metadata.lang)}">
   <head>
@@ -322,7 +336,9 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(page.metadata.title)}</title>
     <meta name="description" content="${escapeHtml(page.metadata.description)}" />
+    ${canonicalUrl ? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />` : ""}
     ${socialMeta.join("\n    ")}
+    ${analyticsHtml ? analyticsHtml : ""}
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
