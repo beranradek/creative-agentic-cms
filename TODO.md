@@ -90,7 +90,7 @@ It is organized by milestones and designed to be executed incrementally with con
 - [ ] Controls:
   - [x] Mic STT input for prompt (browser SpeechRecognition).
   - [x] “Suggest” mode (draft plan + changes summary) vs “Apply” mode.
-  - [ ] Step-by-step edits (agent proposes patches, user approves each).
+  - [x] Step-by-step edits (agent proposes patches, user approves each).
 - [ ] Reliability:
   - [x] Guard: no implicit deletions.
   - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.

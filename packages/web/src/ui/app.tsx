@@ -571,6 +571,139 @@ const DiffSummarySchema = z.object({
 
 type DiffSummary = z.infer<typeof DiffSummarySchema>;
 
+type AgentProposalStep =
+  | { id: "page:settings"; title: string }
+  | { id: "page:assets"; title: string }
+  | { id: "sections:reorder"; title: string }
+  | { id: `section:add:${string}`; title: string; sectionId: string }
+  | { id: `section:update:${string}`; title: string; sectionId: string }
+  | { id: `section:remove:${string}`; title: string; sectionId: string };
+
+function computeAgentProposalSteps(basePage: Page, proposedPage: Page): AgentProposalStep[] {
+  const steps: AgentProposalStep[] = [];
+
+  const settingsChanged =
+    JSON.stringify(basePage.metadata) !== JSON.stringify(proposedPage.metadata) ||
+    JSON.stringify(basePage.theme) !== JSON.stringify(proposedPage.theme);
+  if (settingsChanged) {
+    steps.push({ id: "page:settings", title: "Update page metadata + theme" });
+  }
+
+  const assetsChanged = JSON.stringify(basePage.assets) !== JSON.stringify(proposedPage.assets);
+  if (assetsChanged) {
+    steps.push({ id: "page:assets", title: `Update assets (${proposedPage.assets.length})` });
+  }
+
+  const baseSectionIds = basePage.sections.map((s) => s.id);
+  const proposedSectionIds = proposedPage.sections.map((s) => s.id);
+  if (baseSectionIds.join("|") !== proposedSectionIds.join("|")) {
+    steps.push({ id: "sections:reorder", title: "Reorder sections" });
+  }
+
+  const baseById = new Map(basePage.sections.map((s) => [s.id, s] as const));
+  const proposedById = new Map(proposedPage.sections.map((s) => [s.id, s] as const));
+
+  for (const section of proposedPage.sections) {
+    const base = baseById.get(section.id);
+    if (!base) {
+      steps.push({
+        id: `section:add:${section.id}`,
+        sectionId: section.id,
+        title: `Add section: ${section.label || section.id}`,
+      });
+      continue;
+    }
+    if (JSON.stringify(base) !== JSON.stringify(section)) {
+      steps.push({
+        id: `section:update:${section.id}`,
+        sectionId: section.id,
+        title: `Update section: ${section.label || section.id}`,
+      });
+    }
+  }
+
+  for (const section of basePage.sections) {
+    if (!proposedById.has(section.id)) {
+      steps.push({
+        id: `section:remove:${section.id}`,
+        sectionId: section.id,
+        title: `Remove section: ${section.label || section.id}`,
+      });
+    }
+  }
+
+  return steps;
+}
+
+function buildPartialAgentProposalPage(basePage: Page, fullProposedPage: Page, stepIds: Set<string>): Page {
+  let next: Page = basePage;
+
+  if (stepIds.has("page:settings")) {
+    next = { ...next, metadata: fullProposedPage.metadata, theme: fullProposedPage.theme };
+  }
+  if (stepIds.has("page:assets")) {
+    next = { ...next, assets: fullProposedPage.assets };
+  }
+
+  const proposedById = new Map(fullProposedPage.sections.map((s) => [s.id, s] as const));
+  const baseById = new Map(basePage.sections.map((s) => [s.id, s] as const));
+  const proposedIdsSet = new Set(fullProposedPage.sections.map((s) => s.id));
+
+  const addSelected = new Set(
+    [...stepIds]
+      .filter((id): id is `section:add:${string}` => id.startsWith("section:add:"))
+      .map((id) => id.slice("section:add:".length))
+      .filter(Boolean)
+  );
+  const updateSelected = new Set(
+    [...stepIds]
+      .filter((id): id is `section:update:${string}` => id.startsWith("section:update:"))
+      .map((id) => id.slice("section:update:".length))
+      .filter(Boolean)
+  );
+  const removeSelected = new Set(
+    [...stepIds]
+      .filter((id): id is `section:remove:${string}` => id.startsWith("section:remove:"))
+      .map((id) => id.slice("section:remove:".length))
+      .filter(Boolean)
+  );
+
+  const wantsTargetOrder = stepIds.has("sections:reorder") || addSelected.size > 0;
+  let nextSections: Section[] = [];
+
+  if (wantsTargetOrder) {
+    for (const proposed of fullProposedPage.sections) {
+      const base = baseById.get(proposed.id) ?? null;
+      if (base) {
+        nextSections.push(updateSelected.has(proposed.id) ? proposed : base);
+        continue;
+      }
+      if (addSelected.has(proposed.id)) {
+        nextSections.push(proposed);
+      }
+    }
+
+    for (const base of basePage.sections) {
+      if (proposedIdsSet.has(base.id)) continue;
+      if (removeSelected.has(base.id)) continue;
+      nextSections.push(base);
+    }
+  } else {
+    for (const base of basePage.sections) {
+      const proposed = proposedById.get(base.id) ?? null;
+      if (!proposed) {
+        if (removeSelected.has(base.id)) continue;
+        nextSections.push(base);
+        continue;
+      }
+      nextSections.push(updateSelected.has(base.id) ? proposed : base);
+    }
+  }
+
+  next = { ...next, sections: nextSections };
+  return next;
+}
+
 const ScreenshotRequestOptionsSchema = z.object({
   width: z.number().int().positive().max(4096).optional(),
   height: z.number().int().positive().max(4096).optional(),
@@ -865,6 +998,7 @@ export function App() {
   const [agentProposalBaseJson, setAgentProposalBaseJson] = useState<string | null>(null);
   const [agentProposalMessage, setAgentProposalMessage] = useState<string | null>(null);
   const [agentProposalBaseEtag, setAgentProposalBaseEtag] = useState<string | null>(null);
+  const [agentProposalStepSelection, setAgentProposalStepSelection] = useState<Record<string, boolean>>({});
   const [agentDiffSummary, setAgentDiffSummary] = useState<DiffSummary | null>(null);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
   const [exportConfig, setExportConfig] = useState<ExportConfig | null>(null);
@@ -894,6 +1028,26 @@ export function App() {
   const activeProjectId = loadedProjectId;
   const canUndo = canEdit && state.kind === "ready" && state.editor.past.length > 0;
   const canRedo = canEdit && state.kind === "ready" && state.editor.future.length > 0;
+
+  const agentProposalSteps = useMemo(() => {
+    if (!agentProposal || !agentProposalBasePage) return [];
+    return computeAgentProposalSteps(agentProposalBasePage, agentProposal);
+  }, [agentProposal, agentProposalBasePage]);
+
+  useEffect(() => {
+    if (!agentProposalSteps.length) {
+      setAgentProposalStepSelection({});
+      return;
+    }
+    setAgentProposalStepSelection((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const step of agentProposalSteps) {
+        const prevValue = prev[step.id];
+        next[step.id] = typeof prevValue === "boolean" ? prevValue : true;
+      }
+      return next;
+    });
+  }, [agentProposalSteps]);
 
   const imageAssets = useMemo(() => {
     if (!page) return [];
@@ -1534,6 +1688,7 @@ export function App() {
         setAgentProposalBasePage(page);
         setAgentProposalBaseJson(baseJson);
         setAgentProposalMessage(trimmed);
+        setAgentProposalStepSelection({});
         toast.success("Agent suggested changes", "Review and apply when ready.");
       } else {
         toast.error("Agent returned no proposal");
@@ -1586,6 +1741,7 @@ export function App() {
       setAgentProposalBaseJson(null);
       setAgentProposalMessage(null);
       setAgentProposalBaseEtag(null);
+      setAgentProposalStepSelection({});
       setSelected(null);
       toast.success("Applied suggestion", `projects/${activeProjectId}/page.json`);
     } catch (error) {
@@ -1612,6 +1768,99 @@ export function App() {
     toast,
     updatePage,
   ]);
+
+  const applyAgentProposalSelectedSteps = useCallback(
+    async (mode: "selected" | "next") => {
+      if (!agentProposal) return;
+      if (isSaving) return;
+      if (!agentProposalBasePage || !agentProposalMessage || !agentProposalBaseJson) {
+        toast.error("Cannot apply suggestion", "Missing base state (rerun the agent).");
+        return;
+      }
+      if (latestPageJsonRef.current !== agentProposalBaseJson) {
+        toast.error("Cannot apply suggestion", "Page changed since suggestion (rerun the agent).");
+        return;
+      }
+
+      const selectedSteps = agentProposalSteps.filter((s) => agentProposalStepSelection[s.id] !== false);
+      if (!selectedSteps.length) {
+        toast.info("No steps selected");
+        return;
+      }
+
+      const stepsToApply = mode === "next" ? selectedSteps.slice(0, 1) : selectedSteps;
+      const stepIds = new Set<string>(stepsToApply.map((s) => s.id));
+      const partial = buildPartialAgentProposalPage(agentProposalBasePage, agentProposal, stepIds);
+      if (JSON.stringify(partial) === JSON.stringify(agentProposalBasePage)) {
+        toast.info("No changes to apply");
+        return;
+      }
+
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        const result = await apiApplyAgentProposal(
+          activeProjectId,
+          agentProposalMessage,
+          agentProposalBasePage,
+          partial,
+          agentProposalBaseEtag
+        );
+        pageEtagRef.current = result.pageEtag;
+        setConflict(null);
+        updatePage(() => result.page, { recordUndo: true });
+        lastSavedJsonRef.current = JSON.stringify(result.page);
+        setLastSavedAtMs(Date.now());
+        setAutosaveError(null);
+        setAgentDiffSummary(result.diffSummary);
+
+        const nextBaseJson = JSON.stringify(result.page);
+        setAgentProposalBasePage(result.page);
+        setAgentProposalBaseJson(nextBaseJson);
+        setAgentProposalBaseEtag(result.pageEtag);
+        setSelected(null);
+
+        const remaining = computeAgentProposalSteps(result.page, agentProposal);
+        if (!remaining.length) {
+          setAgentProposal(null);
+          setAgentProposalBasePage(null);
+          setAgentProposalBaseJson(null);
+          setAgentProposalMessage(null);
+          setAgentProposalBaseEtag(null);
+          setAgentProposalStepSelection({});
+          toast.success("Applied suggestion", "All steps applied.");
+          return;
+        }
+
+        toast.success("Applied suggestion", mode === "next" ? stepsToApply[0]?.title ?? "Step" : "Selected steps");
+      } catch (error) {
+        if (error instanceof ApiConflictError) {
+          setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+          setSaveError("Conflict: page changed on disk. Reload or overwrite.");
+          toast.error("Apply conflict", "Page changed on disk. Reload or overwrite.");
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setSaveError(message);
+          toast.error("Apply failed", message);
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      activeProjectId,
+      agentProposal,
+      agentProposalBaseJson,
+      agentProposalBasePage,
+      agentProposalBaseEtag,
+      agentProposalMessage,
+      agentProposalStepSelection,
+      agentProposalSteps,
+      isSaving,
+      toast,
+      updatePage,
+    ]
+  );
 
   const saveExportConfig = useCallback(async () => {
     if (!exportConfig) return;
@@ -2243,6 +2492,8 @@ export function App() {
                             setAgentProposalBasePage(null);
                             setAgentProposalBaseJson(null);
                             setAgentProposalMessage(null);
+                            setAgentProposalBaseEtag(null);
+                            setAgentProposalStepSelection({});
                             setAgentDiffSummary(null);
                           }}
                           disabled={!agentReply && !agentError && !agentProposal && !agentDiffSummary}
@@ -2257,17 +2508,53 @@ export function App() {
                           </button>
                           <button
                             className="btn"
+                            onClick={() => void applyAgentProposalSelectedSteps("selected")}
+                            disabled={isSaving || isAgentRunning || !agentProposalSteps.length}
+                            title="Apply only the selected steps below"
+                          >
+                            Apply selected
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => void applyAgentProposalSelectedSteps("next")}
+                            disabled={isSaving || isAgentRunning || !agentProposalSteps.length}
+                            title="Apply the next selected step"
+                          >
+                            Apply next
+                          </button>
+                          <button
+                            className="btn"
                             onClick={() => {
                               setAgentProposal(null);
                               setAgentProposalBasePage(null);
                               setAgentProposalBaseJson(null);
                               setAgentProposalMessage(null);
+                              setAgentProposalBaseEtag(null);
                               setAgentDiffSummary(null);
+                              setAgentProposalStepSelection({});
                             }}
                             disabled={isSaving || isAgentRunning}
                           >
                             Discard
                           </button>
+                        </div>
+                      ) : null}
+                      {agentProposal && agentProposalSteps.length ? (
+                        <div className="stack" style={{ marginTop: 10 }}>
+                          <div className="muted">Approve steps:</div>
+                          {agentProposalSteps.map((step) => (
+                            <label key={step.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={agentProposalStepSelection[step.id] !== false}
+                                onChange={(e) =>
+                                  setAgentProposalStepSelection((prev) => ({ ...prev, [step.id]: e.target.checked }))
+                                }
+                                disabled={isSaving || isAgentRunning}
+                              />
+                              <span className="muted">{step.title}</span>
+                            </label>
+                          ))}
                         </div>
                       ) : null}
                       {agentError ? (
