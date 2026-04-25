@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
@@ -119,6 +120,26 @@ app.use("/api/projects/:projectId/export", createExportRouter({ store, projectId
 app.use("/api/projects/:projectId/preview", createPreviewRouter({ store, projectIdSchema: ProjectIdSchema }));
 
 app.use("/projects", express.static(dataDirAbs, { fallthrough: true }));
+
+if (config.SERVE_WEB) {
+  const webDistAbs = path.resolve(projectRoot, config.WEB_DIST_DIR);
+  const indexHtmlAbs = path.join(webDistAbs, "index.html");
+
+  if (!fs.existsSync(indexHtmlAbs)) {
+    console.warn(
+      `[server] SERVE_WEB is enabled but WEB_DIST_DIR does not contain index.html: ${indexHtmlAbs}`
+    );
+  } else {
+    app.use(express.static(webDistAbs, { index: false }));
+    app.get("*", (req, res, next) => {
+      if (req.method !== "GET") return next();
+      if (req.path.startsWith("/api") || req.path.startsWith("/projects")) return next();
+      const accept = req.header("accept") ?? "";
+      if (accept && !accept.includes("text/html") && accept !== "*/*") return next();
+      res.sendFile(indexHtmlAbs);
+    });
+  }
+}
 
 app.listen(config.PORT, config.HOST, () => {
   console.log(`[server] listening on http://${config.HOST}:${config.PORT}`);

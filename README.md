@@ -116,11 +116,14 @@ Production-ish (manual):
 ```bash
 pnpm build
 
-# API server (serves /api + /projects)
+# Single-process (recommended): API + /projects + web UI (from packages/web/dist)
+# Set SERVE_WEB=1 in .env (see .env.example)
 node --env-file=.env packages/server/dist/index.js
 
-# Web build (static files): serve `packages/web/dist/` via nginx/Caddy (or run `pnpm --filter @cac/web preview`)
+# Alternative: serve `packages/web/dist/` separately via nginx/Caddy.
 ```
+
+Deployment runbook: `docs/deployment/runbook.md`.
 
 ### Playwright (optional; required for screenshot capture)
 
