@@ -93,3 +93,15 @@ sudo systemctl reload nginx
 ## 5) Backups
 
 Back up the `projects/` directory (it contains `page.json`, `assets/`, and export output per project).
+
+Create an archive (keeps the newest 14 by default):
+
+```bash
+KEEP=14 DATA_DIR=./projects ./scripts/backup-projects.sh ./backups
+```
+
+Example cron (daily at 03:15 UTC):
+
+```cron
+15 3 * * * cd /srv/creative-agentic-cms && KEEP=14 DATA_DIR=./projects ./scripts/backup-projects.sh ./backups >/dev/null 2>&1
+```

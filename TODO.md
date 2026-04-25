@@ -126,4 +126,4 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [x] Production runbook (systemd unit + reverse proxy).
 - [x] Serve web build from server (optional single-process deploy).
-- [ ] Backups for `projects/` directory.
+- [x] Backups for `projects/` directory.
