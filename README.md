@@ -172,3 +172,4 @@ cd packages/<package> && pnpm test
 E2E notes:
 - `CAC_E2E_SCREENSHOT=1` enables screenshot capture E2E (requires Playwright on the server).
 - `CAC_E2E_AGENT=1` enables agent-run E2E (requires server `OPENAI_API_KEY` + `MODEL` configured).
+- Manual checklist: `docs/testing/manual-e2e-checklist.md`.

@@ -102,11 +102,11 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 7 — Export (static site quality)
 
-- [ ] Export options:
+- [x] Export options:
   - [x] Export HTML+CSS+assets into `projects/<id>/output`.
   - [x] Per-project export config (base URL, analytics, robots, sitemap).
   - [x] SEO metadata completeness (title/description + OG/Twitter tags).
-- [ ] Contact form:
+- [x] Contact form:
   - [x] Pluggable submit (Formspree / Netlify forms / custom endpoint).
 
 ## Milestone 8 — Testing & Automation
@@ -119,11 +119,11 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] style edits + export correctness
   - [x] agent run (skip if no key)
   - [x] screenshot capture (enable via `CAC_E2E_SCREENSHOT=1`)
-- [ ] ChromeDev MCP “manual script” checklist:
-  - [ ] drag, edit, upload, screenshot, agent edit, export.
+- [x] ChromeDev MCP “manual script” checklist:
+  - [x] Script: `docs/testing/manual-e2e-checklist.md`.
 
 ## Milestone 9 — Deployment
 
-- [ ] Production runbook (systemd unit + reverse proxy).
-- [ ] Serve web build from server (optional single-process deploy).
+- [x] Production runbook (systemd unit + reverse proxy).
+- [x] Serve web build from server (optional single-process deploy).
 - [ ] Backups for `projects/` directory.
