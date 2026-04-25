@@ -249,6 +249,72 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
 
   const body = page.sections.map((s) => renderSection(s, assetsById)).join("\n");
 
+  let ogImage:
+    | null
+    | {
+        filename: string;
+        alt: string;
+        width: number | null;
+        height: number | null;
+      } = null;
+  try {
+    let ogImageAssetId: string | null = null;
+
+    for (const section of page.sections) {
+      for (const c of section.components) {
+        if (c.type === "hero" && c.backgroundImageAssetId) {
+          ogImageAssetId = c.backgroundImageAssetId;
+          break;
+        }
+      }
+      if (ogImageAssetId) break;
+    }
+
+    if (!ogImageAssetId) {
+      for (const section of page.sections) {
+        for (const c of section.components) {
+          if (c.type === "image") {
+            ogImageAssetId = c.assetId;
+            break;
+          }
+        }
+        if (ogImageAssetId) break;
+      }
+    }
+
+    if (!ogImageAssetId) {
+      const firstImage = page.assets.find((a) => a.type === "image");
+      ogImageAssetId = firstImage?.type === "image" ? firstImage.id : null;
+    }
+
+    const asset = ogImageAssetId ? assetsById.get(ogImageAssetId) : null;
+    if (asset && asset.type === "image") {
+      ogImage = {
+        filename: asset.filename,
+        alt: asset.alt,
+        width: asset.width,
+        height: asset.height,
+      };
+    }
+  } catch {
+    ogImage = null;
+  }
+
+  const socialMeta: string[] = [];
+  socialMeta.push(`<meta property="og:type" content="website" />`);
+  socialMeta.push(`<meta property="og:title" content="${escapeHtml(page.metadata.title)}" />`);
+  socialMeta.push(`<meta property="og:description" content="${escapeHtml(page.metadata.description)}" />`);
+  if (ogImage) {
+    socialMeta.push(`<meta property="og:image" content="assets/${escapeHtml(ogImage.filename)}" />`);
+    if (ogImage.width !== null) socialMeta.push(`<meta property="og:image:width" content="${ogImage.width}" />`);
+    if (ogImage.height !== null) socialMeta.push(`<meta property="og:image:height" content="${ogImage.height}" />`);
+    if (ogImage.alt) socialMeta.push(`<meta property="og:image:alt" content="${escapeHtml(ogImage.alt)}" />`);
+  }
+  socialMeta.push(`<meta name="twitter:card" content="${ogImage ? "summary_large_image" : "summary"}" />`);
+  socialMeta.push(`<meta name="twitter:title" content="${escapeHtml(page.metadata.title)}" />`);
+  socialMeta.push(`<meta name="twitter:description" content="${escapeHtml(page.metadata.description)}" />`);
+  if (ogImage) socialMeta.push(`<meta name="twitter:image" content="assets/${escapeHtml(ogImage.filename)}" />`);
+
   const html = `<!doctype html>
 <html lang="${escapeHtml(page.metadata.lang)}">
   <head>
@@ -256,6 +322,7 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(page.metadata.title)}</title>
     <meta name="description" content="${escapeHtml(page.metadata.description)}" />
+    ${socialMeta.join("\n    ")}
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>

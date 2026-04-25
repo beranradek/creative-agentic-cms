@@ -105,7 +105,7 @@ It is organized by milestones and designed to be executed incrementally with con
 - [ ] Export options:
   - [x] Export HTML+CSS+assets into `projects/<id>/output`.
   - [ ] Per-project export config (base URL, analytics, robots, sitemap).
-  - [ ] SEO metadata completeness.
+  - [x] SEO metadata completeness (title/description + OG/Twitter tags).
 - [ ] Contact form:
   - [ ] Pluggable submit (Formspree / Netlify forms / custom endpoint).
 

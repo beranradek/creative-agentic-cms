@@ -3,6 +3,42 @@ import { PageSchema } from "@cac/shared";
 import { renderPageHtml } from "./render-page.js";
 
 describe("renderPageHtml", () => {
+  it("renders basic Open Graph + Twitter metadata (prefers hero background image)", () => {
+    const page = PageSchema.parse({
+      version: 1,
+      metadata: { title: "My Page", description: "Desc", lang: "en" },
+      assets: [{ id: "a1", type: "image", filename: "hero.png", mimeType: "image/png", width: 1200, height: 630, alt: "Hero" }],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: {},
+          components: [
+            {
+              id: "c1",
+              type: "hero",
+              headline: "Hello",
+              subheadline: "World",
+              backgroundImageAssetId: "a1",
+            },
+          ],
+        },
+      ],
+    });
+
+    const { html } = renderPageHtml(page);
+    expect(html).toContain('property="og:type" content="website"');
+    expect(html).toContain('property="og:title" content="My Page"');
+    expect(html).toContain('property="og:description" content="Desc"');
+    expect(html).toContain('property="og:image" content="assets/hero.png"');
+    expect(html).toContain('property="og:image:width" content="1200"');
+    expect(html).toContain('property="og:image:height" content="630"');
+    expect(html).toContain('property="og:image:alt" content="Hero"');
+    expect(html).toContain('name="twitter:card" content="summary_large_image"');
+    expect(html).toContain('name="twitter:image" content="assets/hero.png"');
+  });
+
   it("renders image focal point via object-position", () => {
     const page = PageSchema.parse({
       version: 1,
