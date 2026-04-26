@@ -1349,7 +1349,7 @@ export function App() {
       });
       return next;
     });
-  }, [page, projectId, updatePage, optimizeUploads, maxUploadPx]);
+  }, [activeProjectId, maxUploadPx, optimizeUploads, page, updatePage]);
 
   const uploadImageAssetOnly = useCallback(
     async (file: File) => {
@@ -1386,23 +1386,6 @@ export function App() {
       }
     },
     [activeProjectId, flushAutosaveTimer, maxUploadPx, optimizeUploads, page, toast, updatePage]
-  );
-
-  const replaceAssetIdUsagesInPage = useCallback(
-    (oldAssetId: string, newAssetId: string) => {
-      updatePage((prev) => {
-        const nextSections = prev.sections.map((s) => ({
-          ...s,
-          components: s.components.map((c) => {
-            if (c.type === "hero" && c.backgroundImageAssetId === oldAssetId) return { ...c, backgroundImageAssetId: newAssetId };
-            if (c.type === "image" && c.assetId === oldAssetId) return { ...c, assetId: newAssetId };
-            return c;
-          }),
-        }));
-        return PageSchema.parse({ ...prev, sections: nextSections });
-      });
-    },
-    [updatePage]
   );
 
   const removeSection = useCallback(

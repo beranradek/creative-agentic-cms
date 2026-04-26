@@ -17,7 +17,7 @@ export function createExportRouter(options: CreateExportRouterOptions): express.
 
   router.post("/", async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
-    const _body = z.object({}).passthrough().parse(req.body ?? {});
+    z.object({}).passthrough().parse(req.body ?? {});
 
     const page = await store.readPage(projectId);
     const exportConfig = await store.readExportConfig(projectId);

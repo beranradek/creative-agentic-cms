@@ -98,7 +98,7 @@ export function buildPartialAgentProposalPage(basePage: Page, fullProposedPage: 
   );
 
   const wantsTargetOrder = stepIds.has("sections:reorder") || addSelected.size > 0;
-  let nextSections: Section[] = [];
+  const nextSections: Section[] = [];
 
   if (wantsTargetOrder) {
     for (const proposed of fullProposedPage.sections) {
@@ -132,4 +132,3 @@ export function buildPartialAgentProposalPage(basePage: Page, fullProposedPage: 
   next = { ...next, sections: nextSections };
   return next;
 }
-
