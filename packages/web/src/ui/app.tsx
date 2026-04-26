@@ -1041,9 +1041,22 @@ export function App() {
     }
     setAgentProposalStepSelection((prev) => {
       const next: Record<string, boolean> = {};
+      const hasNonReorderSteps = agentProposalSteps.some((s) => s.id !== "sections:reorder");
       for (const step of agentProposalSteps) {
         const prevValue = prev[step.id];
-        next[step.id] = typeof prevValue === "boolean" ? prevValue : true;
+        if (typeof prevValue === "boolean") {
+          next[step.id] = prevValue;
+          continue;
+        }
+        if (step.id === "sections:reorder" && hasNonReorderSteps) {
+          next[step.id] = false;
+          continue;
+        }
+        if (step.id.startsWith("section:remove:")) {
+          next[step.id] = false;
+          continue;
+        }
+        next[step.id] = true;
       }
       return next;
     });
