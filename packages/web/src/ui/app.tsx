@@ -1078,6 +1078,7 @@ export function App() {
     if (!autosaveEnabled) return;
     if (!canEdit) return;
     if (!isDirty) return;
+    if (conflict) return;
     if (isSaving || isAutosaving || isExporting || isCapturingScreenshot || isAgentRunning) return;
 
     if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current);
@@ -1116,6 +1117,7 @@ export function App() {
   }, [
     autosaveEnabled,
     canEdit,
+    conflict,
     isAgentRunning,
     isAutosaving,
     isCapturingScreenshot,

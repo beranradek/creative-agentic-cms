@@ -125,20 +125,6 @@ export function createImagegenRouter(options: CreateImagegenRouterOptions): expr
       alt: alt ?? "",
     });
 
-    let pageWithEtag;
-    try {
-      pageWithEtag = await store.readPageWithEtag(projectId);
-    } catch {
-      res.status(404).json({ error: "Project not found." });
-      return;
-    }
-
-    const nextPage = {
-      ...pageWithEtag.page,
-      assets: [...pageWithEtag.page.assets, asset],
-    };
-    await store.writePageIfMatch(projectId, nextPage, pageWithEtag.etag);
-
     res.json({ asset });
   });
 
