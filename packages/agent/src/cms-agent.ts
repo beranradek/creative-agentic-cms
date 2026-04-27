@@ -30,8 +30,8 @@ const AgentOutputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("request_screenshot"),
     assistantMessage: z.string().min(1),
-    reason: z.string().min(1).nullable(),
-    options: ScreenshotRequestOptionsSchema.nullable(),
+    reason: z.string().min(1).nullable().optional(),
+    options: ScreenshotRequestOptionsSchema.nullable().optional(),
   }),
 ]);
 
