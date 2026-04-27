@@ -16,9 +16,9 @@ const AgentInputSchema = z.object({
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
 const ScreenshotRequestOptionsSchema = z.object({
-  width: z.number().int().positive().max(4096).optional(),
-  height: z.number().int().positive().max(4096).optional(),
-  fullPage: z.boolean().optional(),
+  width: z.number().int().positive().max(4096).nullable(),
+  height: z.number().int().positive().max(4096).nullable(),
+  fullPage: z.boolean().nullable(),
 });
 
 const AgentOutputSchema = z.discriminatedUnion("kind", [
@@ -30,10 +30,14 @@ const AgentOutputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("request_screenshot"),
     assistantMessage: z.string().min(1),
-    reason: z.string().min(1).optional(),
-    options: ScreenshotRequestOptionsSchema.optional(),
+    reason: z.string().min(1).nullable(),
+    options: ScreenshotRequestOptionsSchema.nullable(),
   }),
 ]);
+
+const AgentOutputEnvelopeSchema = z.object({
+  result: AgentOutputSchema,
+});
 
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
@@ -215,7 +219,7 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
       temperature: Number.isFinite(temperature) ? temperature : 0,
       maxTokens: Number.isFinite(maxTokens) ? maxTokens : 1200,
       apiKey: process.env.OPENAI_API_KEY,
-    }).withStructuredOutput(AgentOutputSchema, { name: "cms_edit_page" });
+    }).withStructuredOutput(AgentOutputEnvelopeSchema, { name: "cms_edit_page" });
 
     const screenshotAvailable = Boolean(parsed.screenshotUrl && parsed.screenshotPngBase64);
     const userText = `Project: ${parsed.projectId}
@@ -250,9 +254,9 @@ ${parsed.userMessage}`;
       new HumanMessage({ content: humanContent }),
     ]);
 
-    const output = AgentOutputSchema.parse(response);
+    const envelope = AgentOutputEnvelopeSchema.parse(response);
     circuitBreaker.onSuccess();
-    return output;
+    return envelope.result;
   } catch (error) {
     circuitBreaker.onFailure(nowMs);
     throw error;
