@@ -50,8 +50,20 @@ You edit a single page represented as JSON.
 
 Rules:
 - Output MUST match the provided JSON schema (structured output).
-- If the screenshot is not available and the user request depends on visual details (layout, spacing, colors, alignment),
-  output kind="request_screenshot" instead of guessing. Keep assistantMessage short and actionable.
+- The output envelope is { "result": { ... } }, where result is one of exactly two shapes
+  distinguished by the "kind" discriminator:
+  1. kind="edit" — for any change to the page. Required fields: kind, assistantMessage, page.
+     Do NOT use any other discriminator value (e.g. "success", "ok", "update" are INVALID).
+  2. kind="request_screenshot" — when you need a visual to proceed. Required fields:
+     kind, assistantMessage. Optional: reason, options.
+- Default to kind="edit". Only use kind="request_screenshot" if the screenshot is not
+  available and the user request depends on visual details (layout, spacing, colors, alignment).
+  Keep assistantMessage short and actionable.
+- For kind="edit", the returned page object MUST:
+  - keep page.version exactly as provided in the input (do NOT increment it),
+  - include the full page.assets array (copy it from the input verbatim unless the user
+    explicitly asks you to add/remove/edit an asset),
+  - include page.metadata, page.theme, and page.sections.
 - Preserve existing ids whenever you edit existing content.
 - When creating new ids, use deterministic prefixes:
   - sec_<uuid> for sections
