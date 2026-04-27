@@ -36,7 +36,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
-  - [ ] Shift/Cmd selection of multiple components.
+  - [x] Shift/Cmd selection of multiple components.
   - [ ] Drag group between sections.
 
 ## Milestone 3 — In-site Editing (WYSIWYG everywhere)

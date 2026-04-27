@@ -298,6 +298,42 @@ test("components can be reordered via drag and drop within a section (Inspector 
     .toBe("contact_form");
 });
 
+test("inspector supports multi-select (shift) and bulk remove", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_inspector_multiselect_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+
+  const sectionCard = page.getByTestId("structure-section-card").first();
+  await sectionCard.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+  await page.getByRole("button", { name: "+ Hero" }).click();
+
+  const rows = page.getByTestId("inspector-component-row");
+  const selects = page.getByTestId("inspector-component-select");
+  await expect(rows).toHaveCount(3);
+  await expect(selects).toHaveCount(3);
+
+  await selects.nth(0).click();
+  await page.keyboard.down("Shift");
+  await selects.nth(2).click();
+  await page.keyboard.up("Shift");
+
+  await expect(rows.nth(0)).toHaveAttribute("data-selected", "true");
+  await expect(rows.nth(1)).toHaveAttribute("data-selected", "true");
+  await expect(rows.nth(2)).toHaveAttribute("data-selected", "true");
+
+  await rows.nth(1).getByRole("button", { name: "Remove" }).click();
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByTestId("preview-item")).toHaveCount(0);
+
+  await saveAndReload(page);
+  await expect(page.getByTestId("preview-item")).toHaveCount(0);
+});
+
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 

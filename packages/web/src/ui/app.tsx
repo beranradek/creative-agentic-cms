@@ -829,6 +829,7 @@ export function App() {
   const [editingSectionLabelId, setEditingSectionLabelId] = useState<string | null>(null);
   const [editingSectionLabelValue, setEditingSectionLabelValue] = useState("");
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ serverPage: Page; serverEtag: string | null } | null>(null);
@@ -945,6 +946,48 @@ export function App() {
     return selectedSection.components.find((c) => c.id === selected.componentId) ?? null;
   }, [selectedSection, selected]);
 
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setSelectedComponentIds([]);
+  }, []);
+
+  const selectSectionOnly = useCallback((sectionId: string) => {
+    setSelected({ sectionId });
+    setSelectedComponentIds([]);
+  }, []);
+
+  const selectComponentSingle = useCallback((sectionId: string, componentId: string) => {
+    setSelected({ sectionId, componentId });
+    setSelectedComponentIds([componentId]);
+  }, []);
+
+  useEffect(() => {
+    if (!page || !selected) {
+      setSelectedComponentIds((prev) => (prev.length ? [] : prev));
+      return;
+    }
+
+    const section = page.sections.find((s) => s.id === selected.sectionId) ?? null;
+    if (!section) {
+      clearSelection();
+      return;
+    }
+
+    const existing = new Set(section.components.map((c) => c.id));
+    setSelectedComponentIds((prev) => {
+      const next = prev.filter((id) => existing.has(id));
+      if (selected.componentId && existing.has(selected.componentId) && !next.includes(selected.componentId)) {
+        next.push(selected.componentId);
+      }
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
+      return next;
+    });
+
+    if (selected.componentId && !existing.has(selected.componentId)) {
+      setSelected({ sectionId: selected.sectionId });
+    }
+  }, [clearSelection, page, selected]);
+
   const refreshProjects = useCallback(async () => {
     setIsProjectsLoading(true);
     setProjectsError(null);
@@ -976,7 +1019,7 @@ export function App() {
       setAutosaveError(null);
       setSaveError(null);
       setLoadedProjectId(effectiveProjectId);
-      setSelected(null);
+      clearSelection();
       setAgentReply(null);
       setAgentError(null);
       setAgentProposal(null);
@@ -1004,7 +1047,7 @@ export function App() {
       setExportConfigError(message);
       toast.error("Failed to load project", message);
     }
-  }, [pageEtagRef, projectId, refreshProjects, toast]);
+  }, [clearSelection, pageEtagRef, projectId, refreshProjects, toast]);
 
   useEffect(() => {
     void load();
@@ -1099,10 +1142,10 @@ export function App() {
     setLastSavedAtMs(Date.now());
     setAutosaveError(null);
     setSaveError(null);
-    setSelected(null);
+    clearSelection();
     setConflict(null);
     toast.success("Reloaded latest from disk");
-  }, [conflict, flushAutosaveTimer, toast]);
+  }, [clearSelection, conflict, flushAutosaveTimer, toast]);
 
   const overwriteAfterConflict = useCallback(async () => {
     if (!page) return;
@@ -1201,8 +1244,8 @@ export function App() {
       const nextFuture = [page, ...future].slice(0, UNDO_LIMIT);
       return { kind: "ready", editor: { page: previous, past: nextPast, future: nextFuture } };
     });
-    setSelected(null);
-  }, []);
+    clearSelection();
+  }, [clearSelection]);
 
   const redo = useCallback(() => {
     setState((prev) => {
@@ -1214,8 +1257,8 @@ export function App() {
       const nextFuture = future.slice(1);
       return { kind: "ready", editor: { page: next, past: nextPast, future: nextFuture } };
     });
-    setSelected(null);
-  }, []);
+    clearSelection();
+  }, [clearSelection]);
 
   useEffect(() => {
     if (!canEdit || isSaving) return;
@@ -1394,9 +1437,9 @@ export function App() {
         const next: Page = { ...prev, sections: prev.sections.filter((s) => s.id !== sectionId) };
         return PageSchema.parse(next);
       });
-      setSelected((prev) => (prev?.sectionId === sectionId ? null : prev));
+      if (selected?.sectionId === sectionId) clearSelection();
     },
-    [updatePage]
+    [clearSelection, selected, updatePage]
   );
 
   const appendTranscript = useCallback((prev: string, next: string) => {
@@ -1544,7 +1587,7 @@ export function App() {
         lastSavedJsonRef.current = JSON.stringify(result.page);
         setLastSavedAtMs(Date.now());
         setAutosaveError(null);
-        setSelected(null);
+        clearSelection();
         toast.success("Agent applied changes");
       } else if (result.proposedPage) {
         setAgentProposalBaseEtag(result.pageEtag);
@@ -1570,7 +1613,7 @@ export function App() {
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentRunMode, agentText, ensureSaved, isSttActive, page, stopAgentStt, toast, updatePage]);
+  }, [activeProjectId, agentRunMode, agentText, clearSelection, ensureSaved, isSttActive, page, stopAgentStt, toast, updatePage]);
 
   const applyAgentProposal = useCallback(async () => {
     if (!agentProposal) return;
@@ -1606,7 +1649,7 @@ export function App() {
       setAgentProposalMessage(null);
       setAgentProposalBaseEtag(null);
       setAgentProposalStepSelection({});
-      setSelected(null);
+      clearSelection();
       toast.success("Applied suggestion", `projects/${activeProjectId}/page.json`);
     } catch (error) {
       if (error instanceof ApiConflictError) {
@@ -1628,6 +1671,7 @@ export function App() {
     agentProposalBasePage,
     agentProposalBaseEtag,
     agentProposalMessage,
+    clearSelection,
     isSaving,
     toast,
     updatePage,
@@ -1682,7 +1726,7 @@ export function App() {
         setAgentProposalBasePage(result.page);
         setAgentProposalBaseJson(nextBaseJson);
         setAgentProposalBaseEtag(result.pageEtag);
-        setSelected(null);
+        clearSelection();
 
         const remaining = computeAgentProposalSteps(result.page, agentProposal);
         if (!remaining.length) {
@@ -1720,6 +1764,7 @@ export function App() {
       agentProposalMessage,
       agentProposalStepSelection,
       agentProposalSteps,
+      clearSelection,
       isSaving,
       toast,
       updatePage,
@@ -2701,7 +2746,7 @@ export function App() {
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelected({ sectionId: section.id });
+                                selectSectionOnly(section.id);
                               }}
                               title="Drag section"
                             >
@@ -2741,7 +2786,7 @@ export function App() {
                           projectId={activeProjectId}
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
                           canEdit={canEdit}
-                          onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
+                          onSelect={() => selectComponentSingle(section.id, component.id)}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
                           onDelete={() => {
                             if (!canEdit) return;
@@ -2751,7 +2796,8 @@ export function App() {
                               );
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
-                            setSelected((prevSel) => (prevSel?.componentId === component.id ? null : prevSel));
+                            setSelected((prevSel) => (prevSel?.componentId === component.id ? { sectionId: section.id } : prevSel));
+                            setSelectedComponentIds((prevIds) => prevIds.filter((id) => id !== component.id));
                           }}
                           onDuplicate={() => {
                             if (!canEdit) return;
@@ -2801,9 +2847,9 @@ export function App() {
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            setSelected((prevSel) =>
-                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                            );
+                            if (selected?.componentId === fromComponentId) {
+                              selectComponentSingle(section.id, fromComponentId);
+                            }
                           }}
                         />
                       ))}
@@ -2828,9 +2874,9 @@ export function App() {
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            setSelected((prevSel) =>
-                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                            );
+                            if (selected?.componentId === fromComponentId) {
+                              selectComponentSingle(section.id, fromComponentId);
+                            }
                           }}
                         />
                       </div>
@@ -3293,7 +3339,7 @@ export function App() {
                                 return PageSchema.parse({ ...prev, sections: nextSections });
                               });
 
-                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                              selectComponentSingle(section.id, fromComponentId);
                             }}
                             disabled={!canEdit}
                             title="Move selected component to this section"
@@ -3304,7 +3350,7 @@ export function App() {
                         <button className="btn btnDanger" onClick={() => removeSection(section.id)} disabled={!canEdit}>
                           Remove
                         </button>
-                        <button className="btn" onClick={() => setSelected({ sectionId: section.id })}>
+                        <button className="btn" onClick={() => selectSectionOnly(section.id)}>
                           Select
                         </button>
                       </div>
@@ -3379,9 +3425,9 @@ export function App() {
                           return PageSchema.parse({ ...prev, sections: nextSections });
                         });
 
-                        setSelected((prevSel) =>
-                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
-                        );
+                        if (selected?.componentId === payload.componentId) {
+                          selectComponentSingle(section.id, payload.componentId);
+                        }
                       }}
                       onDrop={(e) => {
                         if (!canEdit) return;
@@ -3406,9 +3452,9 @@ export function App() {
                           return PageSchema.parse({ ...prev, sections: nextSections });
                         });
 
-                        setSelected((prevSel) =>
-                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
-                        );
+                        if (selected?.componentId === payload.componentId) {
+                          selectComponentSingle(section.id, payload.componentId);
+                        }
                       }}
                     >
                       Drop component here
@@ -3421,10 +3467,32 @@ export function App() {
                 <Inspector
                   section={selectedSection}
                   component={selectedComponent}
+                  selectedComponentIds={selectedComponentIds}
                   imageAssets={imageAssets}
                   onUploadImageAssetOnly={uploadImageAssetOnly}
                   canEdit={canEdit}
-                  onSelect={(componentId) => setSelected({ sectionId: selectedSection.id, componentId })}
+                  onSelect={(componentId, e) => {
+                    const ids = selectedSection.components.map((c) => c.id);
+                    const anchor =
+                      selected?.sectionId === selectedSection.id && selected?.componentId ? selected.componentId : null;
+                    const isToggle = e.metaKey || e.ctrlKey;
+                    const isRange = e.shiftKey;
+
+                    setSelected({ sectionId: selectedSection.id, componentId });
+                    setSelectedComponentIds((prev) => {
+                      if (!isToggle && !isRange) return [componentId];
+                      if (isToggle) {
+                        const next = prev.includes(componentId) ? prev.filter((id) => id !== componentId) : [...prev, componentId];
+                        return next.length ? next : [componentId];
+                      }
+                      if (!anchor) return [componentId];
+                      const from = ids.indexOf(anchor);
+                      const to = ids.indexOf(componentId);
+                      if (from < 0 || to < 0) return [componentId];
+                      const [start, end] = from < to ? [from, to] : [to, from];
+                      return ids.slice(start, end + 1);
+                    });
+                  }}
                   onUpdate={(nextSection) =>
                     updatePage((prev) =>
                       PageSchema.parse({
@@ -4073,13 +4141,14 @@ function PreviewDropZone(props: {
 function Inspector(props: {
   section: Section;
   component: Component | null;
+  selectedComponentIds: string[];
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   canEdit: boolean;
-  onSelect: (componentId: string) => void;
+  onSelect: (componentId: string, e: React.MouseEvent) => void;
   onUpdate: (next: Section) => void;
 }) {
-  const { section, component, imageAssets, onUploadImageAssetOnly, canEdit, onSelect, onUpdate } = props;
+  const { section, component, selectedComponentIds, imageAssets, onUploadImageAssetOnly, canEdit, onSelect, onUpdate } = props;
   const [selectedImageAssetId, setSelectedImageAssetId] = useState<string>(imageAssets[0]?.id ?? "");
   const [dragOverComponentId, setDragOverComponentId] = useState<string | null>(null);
 
@@ -4131,11 +4200,11 @@ function Inspector(props: {
   );
 
   const removeComponent = useCallback(
-    (componentId: string) => {
+    (componentIds: string[]) => {
       if (!canEdit) return;
       const next: Section = {
         ...section,
-        components: section.components.filter((c) => c.id !== componentId),
+        components: section.components.filter((c) => !componentIds.includes(c.id)),
       };
       onUpdate(next);
     },
@@ -4476,6 +4545,7 @@ function Inspector(props: {
               data-testid="inspector-component-row"
               data-component-id={c.id}
               data-component-type={c.type}
+              data-selected={selectedComponentIds.includes(c.id) ? "true" : "false"}
               draggable={canEdit}
               onDragStart={(e) => {
                 if (!canEdit) return;
@@ -4486,11 +4556,22 @@ function Inspector(props: {
                 // Defer clearing so drop handlers can still read the in-memory payload if needed.
                 setTimeout(() => clearDragPayload(), 50);
               }}
-              style={
-                dragOverComponentId === c.id
-                  ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
-                  : { justifyContent: "space-between" }
-              }
+              style={(() => {
+                const base = { justifyContent: "space-between" } as const;
+                const isSelected = selectedComponentIds.includes(c.id);
+                const selectedStyle = isSelected
+                  ? {
+                      ...base,
+                      outline: "2px solid rgba(124, 92, 255, 0.35)",
+                      outlineOffset: 2,
+                      borderRadius: 12,
+                      padding: 4,
+                      background: "rgba(124, 92, 255, 0.06)",
+                    }
+                  : base;
+                if (dragOverComponentId === c.id) return { ...selectedStyle, outline: "2px solid rgba(124, 92, 255, 0.55)" };
+                return selectedStyle;
+              })()}
               onDragOver={(e) => {
                 if (!canEdit) return;
                 const payload = getDragPayload(e);
@@ -4535,22 +4616,30 @@ function Inspector(props: {
                 >
                   ⋮⋮
                 </span>
-                <button className="btn" onClick={() => onSelect(c.id)}>
+                <button className="btn" data-testid="inspector-component-select" onClick={(e) => onSelect(c.id, e)}>
                   {c.type}
                 </button>
               </div>
               <div className="row">
-                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={!canEdit || idx === 0}>
+                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={!canEdit || idx === 0 || selectedComponentIds.length > 1}>
                   ↑
                 </button>
                 <button
                   className="btn"
                   onClick={() => moveComponent(c.id, 1)}
-                  disabled={!canEdit || idx === section.components.length - 1}
+                  disabled={!canEdit || idx === section.components.length - 1 || selectedComponentIds.length > 1}
                 >
                   ↓
                 </button>
-                <button className="btn btnDanger" onClick={() => removeComponent(c.id)} disabled={!canEdit}>
+                <button
+                  className="btn btnDanger"
+                  onClick={() =>
+                    removeComponent(
+                      selectedComponentIds.length > 1 && selectedComponentIds.includes(c.id) ? selectedComponentIds : [c.id]
+                    )
+                  }
+                  disabled={!canEdit}
+                >
                   Remove
                 </button>
                 <span className="badge">{c.id.slice(0, 8)}</span>
