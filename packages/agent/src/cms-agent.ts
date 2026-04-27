@@ -208,7 +208,7 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
     throw new Error("OPENAI_API_KEY is not set. Copy .env.example to .env and set your key.");
   }
   const temperature = Number(process.env.TEMPERATURE ?? "0");
-  const maxTokens = Number(process.env.MAX_TOKENS ?? "1200");
+  const maxTokens = Number(process.env.MAX_TOKENS ?? "4000");
 
   const nowMs = Date.now();
   circuitBreaker.canRequest(nowMs);
@@ -217,7 +217,7 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
     const model = new ChatOpenAI({
       model: modelName,
       temperature: Number.isFinite(temperature) ? temperature : 0,
-      maxTokens: Number.isFinite(maxTokens) ? maxTokens : 1200,
+      maxTokens: Number.isFinite(maxTokens) ? maxTokens : 4000,
       apiKey: process.env.OPENAI_API_KEY,
     }).withStructuredOutput(AgentOutputEnvelopeSchema, {
       name: "cms_edit_page",
