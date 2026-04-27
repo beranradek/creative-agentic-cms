@@ -219,7 +219,10 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
       temperature: Number.isFinite(temperature) ? temperature : 0,
       maxTokens: Number.isFinite(maxTokens) ? maxTokens : 1200,
       apiKey: process.env.OPENAI_API_KEY,
-    }).withStructuredOutput(AgentOutputEnvelopeSchema, { name: "cms_edit_page" });
+    }).withStructuredOutput(AgentOutputEnvelopeSchema, {
+      name: "cms_edit_page",
+      method: "functionCalling",
+    });
 
     const screenshotAvailable = Boolean(parsed.screenshotUrl && parsed.screenshotPngBase64);
     const userText = `Project: ${parsed.projectId}
