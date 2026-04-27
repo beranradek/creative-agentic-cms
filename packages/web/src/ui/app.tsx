@@ -675,6 +675,46 @@ async function apiReplaceImageAsset(
   return { asset, page, pageEtag: getEtagHeader(res) };
 }
 
+async function apiGenerateImage(
+  projectId: string,
+  prompt: string,
+  size: string,
+  quality: string
+): Promise<{ jobId: string }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, size, quality }),
+  });
+  const json = (await res.json()) as unknown;
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Generate failed (${res.status})`);
+  return json as { jobId: string };
+}
+
+async function apiPollImageJob(
+  projectId: string,
+  jobId: string
+): Promise<{ status: string; tempImageId?: string; error?: string }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/job/${encodeURIComponent(jobId)}`);
+  const json = (await res.json()) as unknown;
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Poll failed (${res.status})`);
+  return json as { status: string; tempImageId?: string; error?: string };
+}
+
+async function apiSaveGeneratedImage(projectId: string, tempImageId: string, alt?: string): Promise<Asset> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/imagegen/save/${encodeURIComponent(tempImageId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alt: alt ?? "" }),
+    }
+  );
+  const json = (await res.json()) as unknown;
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Save failed (${res.status})`);
+  return AssetSchema.parse((json as { asset?: unknown }).asset);
+}
+
 async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -835,6 +875,8 @@ export function App() {
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
   const [screenshotError, setScreenshotError] = useState<string | null>(null);
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
+  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
+  const [imagegenAvailable, setImagegenAvailable] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const latestPageRef = useRef<Page | null>(null);
   const latestPageJsonRef = useRef<string | null>(null);
@@ -913,6 +955,17 @@ export function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    fetch("/api/imagegen/available")
+      .then((r) => r.json())
+      .then((json) => {
+        setImagegenAvailable((json as { available?: boolean }).available === true);
+      })
+      .catch(() => {
+        setImagegenAvailable(false);
+      });
+  }, []);
 
   useEffect(() => {
     void refreshProjects();
@@ -2064,6 +2117,16 @@ export function App() {
                         <div className="muted">
                           Uploads to <code>projects/&lt;projectId&gt;/assets</code> and inserts an image block.
                         </div>
+                        {imagegenAvailable && (
+                          <button
+                            className="btn"
+                            disabled={!canEdit}
+                            data-testid="generate-image-btn"
+                            onClick={() => setShowGenerateDialog(true)}
+                          >
+                            Generate image
+                          </button>
+                        )}
                       </div>
 
                       <div className="card">
@@ -3054,6 +3117,29 @@ export function App() {
             });
 
             setImageEditor(null);
+          }}
+        />
+      ) : null}
+
+      {showGenerateDialog && canEdit ? (
+        <GenerateImageDialog
+          projectId={activeProjectId}
+          onClose={() => setShowGenerateDialog(false)}
+          onSaved={(asset) => {
+            updatePage((prev) =>
+              PageSchema.parse({
+                ...prev,
+                assets: [...prev.assets, asset],
+                sections: [
+                  ...prev.sections,
+                  {
+                    ...createSection("Image"),
+                    components: [createImageComponent(asset.id)],
+                  },
+                ],
+              })
+            );
+            setShowGenerateDialog(false);
           }}
         />
       ) : null}
@@ -5243,6 +5329,177 @@ function ImageEditorModal(props: {
             <div className="card">Missing image source.</div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+type GeneratePhase = "form" | "generating" | "preview" | "saving" | "error";
+
+function GenerateImageDialog(props: {
+  projectId: string;
+  onClose: () => void;
+  onSaved: (asset: Asset) => void;
+}) {
+  const { projectId, onClose, onSaved } = props;
+  const [prompt, setPrompt] = useState("");
+  const [size, setSize] = useState("1024x1024");
+  const [quality, setQuality] = useState("medium");
+  const [phase, setPhase] = useState<GeneratePhase>("form");
+  const [tempImageId, setTempImageId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+    setPhase("generating");
+    setErrorMsg(null);
+    try {
+      const { jobId } = await apiGenerateImage(projectId, prompt.trim(), size, quality);
+      const started = Date.now();
+      pollRef.current = setInterval(() => {
+        void (async () => {
+          try {
+            const result = await apiPollImageJob(projectId, jobId);
+            if (result.status === "completed" && result.tempImageId) {
+              stopPolling();
+              setTempImageId(result.tempImageId);
+              setPhase("preview");
+            } else if (result.status === "error") {
+              stopPolling();
+              setErrorMsg(result.error ?? "Image generation failed, try again.");
+              setPhase("error");
+            } else if (Date.now() - started > 3 * 60 * 1000) {
+              stopPolling();
+              setErrorMsg("Generation timed out. Please try again.");
+              setPhase("error");
+            }
+          } catch (e) {
+            stopPolling();
+            setErrorMsg(e instanceof Error ? e.message : "Polling failed.");
+            setPhase("error");
+          }
+        })();
+      }, 3000);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Failed to start generation.");
+      setPhase("error");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!tempImageId) return;
+    setPhase("saving");
+    try {
+      const asset = await apiSaveGeneratedImage(projectId, tempImageId);
+      onSaved(asset);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Failed to save image.");
+      setPhase("error");
+    }
+  };
+
+  return (
+    <div className="generateDialog" role="dialog" aria-modal="true" aria-label="Generate image">
+      <div className="generateDialogCard">
+        <div className="cardTitle">Generate image</div>
+
+        {phase === "form" && (
+          <div className="stack">
+            <div className="field">
+              <label htmlFor="gen-prompt">Describe the image</label>
+              <textarea
+                id="gen-prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={4}
+                maxLength={1000}
+                placeholder="A serene mountain landscape at sunset..."
+                style={{ width: "100%", resize: "vertical" }}
+              />
+            </div>
+            <div className="row" style={{ gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="gen-size">Size</label>
+                <select id="gen-size" value={size} onChange={(e) => setSize(e.target.value)}>
+                  <option value="1024x1024">Square (1024×1024)</option>
+                  <option value="1024x1536">Portrait (1024×1536)</option>
+                  <option value="1536x1024">Landscape (1536×1024)</option>
+                </select>
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="gen-quality">Quality</label>
+                <select id="gen-quality" value={quality} onChange={(e) => setQuality(e.target.value)}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </div>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={onClose}>Cancel</button>
+              <button
+                className="btn btnPrimary"
+                disabled={!prompt.trim()}
+                onClick={() => void handleGenerate()}
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "generating" && (
+          <div className="stack" style={{ alignItems: "center", padding: "32px 0" }}>
+            <div className="spinner" aria-label="Generating image..." />
+            <div className="muted">Generating image, this may take up to a minute…</div>
+            <button className="btn" onClick={() => { stopPolling(); onClose(); }}>Cancel</button>
+          </div>
+        )}
+
+        {phase === "preview" && tempImageId && (
+          <div className="stack">
+            <img
+              src={`/api/projects/${encodeURIComponent(projectId)}/imagegen/temp/${encodeURIComponent(tempImageId)}`}
+              alt="Generated preview"
+              style={{ width: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)" }}
+            />
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={onClose}>Discard</button>
+              <button className="btn btnPrimary" onClick={() => void handleSave()}>
+                Save to Assets
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "saving" && (
+          <div className="stack" style={{ alignItems: "center", padding: "32px 0" }}>
+            <div className="spinner" aria-label="Saving…" />
+            <div className="muted">Saving image…</div>
+          </div>
+        )}
+
+        {phase === "error" && (
+          <div className="stack">
+            <div style={{ color: "var(--color-error, #e55)", padding: "8px 0" }}>{errorMsg}</div>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button className="btn" onClick={onClose}>Close</button>
+              <button className="btn" onClick={() => setPhase("form")}>Try again</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import { createAssetRouter } from "./routes/assets.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createExportRouter } from "./routes/export.js";
 import { createPreviewRouter } from "./routes/preview.js";
+import { createImagegenRouter } from "./routes/imagegen.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +46,10 @@ const ProjectIdSchema = z
   .string()
   .min(1)
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/);
+
+app.get("/api/imagegen/available", (_req, res) => {
+  res.json({ available: !!config.OPENAI_API_KEY });
+});
 
 app.get("/api/projects", async (_req, res) => {
   const projects = await store.listProjects();
@@ -114,6 +119,10 @@ app.put("/api/projects/:projectId/page", async (req, res) => {
 app.use("/api/projects/:projectId/assets", createAssetRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/agent", createAgentRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/export", createExportRouter({ store, projectIdSchema: ProjectIdSchema }));
+if (config.OPENAI_API_KEY) {
+  app.use("/api/projects/:projectId/imagegen", createImagegenRouter({ store, projectIdSchema: ProjectIdSchema, apiKey: config.OPENAI_API_KEY, model: config.IMAGEGEN_MODEL }));
+}
+
 app.use("/api/projects/:projectId/preview", createPreviewRouter({ store, projectIdSchema: ProjectIdSchema }));
 
 app.use("/projects", express.static(dataDirAbs, { fallthrough: true }));

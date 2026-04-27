@@ -355,4 +355,4 @@ pnpm --filter @cac/web test  # unit tests
 
 1. **`openai` package availability:** `@langchain/openai` depends on `openai` SDK transitively. Rather than relying on transitive dep, use `fetch` directly (KISS). Confirm via `pnpm why openai` during implementation.
 2. **`image-size` on Buffer:** `image-size` accepts `Buffer` — works for PNG/WebP/JPEG. For `gpt-image-1` output (always PNG), this is fine.
-3. **Insert generated image as section:** The spec says "generate image as new asset" — so asset-only (no auto-insert into page). Consistent with `uploadImageAssetOnly` pattern.
+3. **Insert generated image as section:** The spec says "generate image as new asset" — Answer: but also insert it into page as new image section, please.
