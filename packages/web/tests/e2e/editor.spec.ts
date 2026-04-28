@@ -334,6 +334,40 @@ test("inspector supports multi-select (shift) and bulk remove", async ({ page })
   await expect(page.getByTestId("preview-item")).toHaveCount(0);
 });
 
+test("structure Move here moves multi-selected components", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_structure_move_multiselect_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+  await page.getByTestId("add-text").click();
+
+  const cards = page.getByTestId("structure-section-card");
+  await expect(cards).toHaveCount(2);
+
+  await cards.nth(0).getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+  await page.getByRole("button", { name: "+ Hero" }).click();
+
+  const selects = page.getByTestId("inspector-component-select");
+  await expect(selects).toHaveCount(3);
+  await selects.nth(0).click();
+  await page.keyboard.down("Shift");
+  await selects.nth(2).click();
+  await page.keyboard.up("Shift");
+
+  await cards.nth(1).getByRole("button", { name: "Move here" }).click();
+
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("4 components");
+
+  await saveAndReload(page);
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("4 components");
+});
+
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 

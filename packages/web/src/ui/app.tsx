@@ -3324,18 +3324,32 @@ export function App() {
                               if (!canEdit) return;
                               const fromComponentId = selected?.componentId;
                               if (!fromComponentId) return;
+                              let fromComponentIds = selectedComponentIds.length ? selectedComponentIds : [fromComponentId];
+
+                              if (!fromComponentIds.includes(fromComponentId)) {
+                                fromComponentIds = [...fromComponentIds, fromComponentId];
+                              }
+
                               updatePage((prev) => {
-                                const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
+                                const fromSection = selected ? prev.sections.find((s) => s.id === selected.sectionId) : null;
                                 const toSection = prev.sections.find((s) => s.id === section.id);
                                 if (!fromSection || !toSection) return prev;
-                                const actualFromSectionId = fromSection.id;
-                                const nextSections = moveComponentByIndex({
-                                  sections: prev.sections,
-                                  fromSectionId: actualFromSectionId,
-                                  fromComponentId,
-                                  toSectionId: section.id,
-                                  toIndex: toSection.components.length,
+                                if (fromSection.id === toSection.id) return prev;
+
+                                const fromIdsSet = new Set(fromComponentIds);
+                                const moving = fromSection.components.filter((c) => fromIdsSet.has(c.id));
+                                if (!moving.length) return prev;
+
+                                const nextSections = prev.sections.map((s) => {
+                                  if (s.id === fromSection.id) {
+                                    return { ...s, components: s.components.filter((c) => !fromIdsSet.has(c.id)) };
+                                  }
+                                  if (s.id === toSection.id) {
+                                    return { ...s, components: [...s.components, ...moving] };
+                                  }
+                                  return s;
                                 });
+
                                 return PageSchema.parse({ ...prev, sections: nextSections });
                               });
 
