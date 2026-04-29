@@ -401,6 +401,48 @@ test("structure dropzone moves multi-selected components as a group", async ({ p
   await expect(cards.nth(1)).toContainText("4 components");
 });
 
+test("preview dropzone moves multi-selected components as a group", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_preview_drop_multiselect_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-text").click();
+  await page.getByTestId("add-text").click();
+
+  const cards = page.getByTestId("structure-section-card");
+  await expect(cards).toHaveCount(2);
+
+  await cards.nth(0).getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "+ Form" }).click();
+  await page.getByRole("button", { name: "+ Hero" }).click();
+
+  const selects = page.getByTestId("inspector-component-select");
+  await expect(selects).toHaveCount(3);
+  await selects.nth(0).click();
+  await page.keyboard.down("Shift");
+  await selects.nth(2).click();
+  await page.keyboard.up("Shift");
+
+  const toSectionId = await cards.nth(1).getAttribute("data-section-id");
+  const dropzone = toSectionId
+    ? page.locator(`[data-testid="preview-dropzone"][data-section-id="${toSectionId}"]`)
+    : page.locator('[data-testid="preview-dropzone"][data-section-id]').nth(1);
+  const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
+  await expect(hero).toHaveCount(1);
+  await dropzone.scrollIntoViewIfNeeded();
+  await hero.scrollIntoViewIfNeeded();
+  await hero.dragTo(dropzone, { force: true });
+
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("4 components");
+
+  await saveAndReload(page);
+  await expect(cards.nth(0)).toContainText("0 components");
+  await expect(cards.nth(1)).toContainText("4 components");
+});
+
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
   await page.goto("/");
 

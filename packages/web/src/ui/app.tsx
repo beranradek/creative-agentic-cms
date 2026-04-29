@@ -466,6 +466,49 @@ function moveComponentByIndex(args: {
   });
 }
 
+function moveComponentsByIndex(args: {
+  sections: Section[];
+  fromSectionId: string;
+  fromComponentIds: string[];
+  toSectionId: string;
+  toIndex: number; // 0..len (append allowed)
+}): Section[] {
+  const { sections, fromSectionId, fromComponentIds, toSectionId, toIndex } = args;
+  const fromSection = sections.find((s) => s.id === fromSectionId);
+  const toSection = sections.find((s) => s.id === toSectionId);
+  if (!fromSection || !toSection) return sections;
+
+  const ids = Array.from(new Set(fromComponentIds));
+  if (!ids.length) return sections;
+  const idSet = new Set(ids);
+
+  const moving = fromSection.components.filter((c) => idSet.has(c.id));
+  if (!moving.length) return sections;
+
+  if (fromSectionId === toSectionId) {
+    const remaining = fromSection.components.filter((c) => !idSet.has(c.id));
+    const removedBefore = fromSection.components.reduce((acc, c, idx) => (idSet.has(c.id) && idx < toIndex ? acc + 1 : acc), 0);
+    const adjustedIndex = toIndex - removedBefore;
+    const clamped = Math.max(0, Math.min(remaining.length, adjustedIndex));
+    const nextComponents = remaining.slice();
+    nextComponents.splice(clamped, 0, ...moving);
+    return sections.map((s) => (s.id === fromSectionId ? { ...s, components: nextComponents } : s));
+  }
+
+  return sections.map((s) => {
+    if (s.id === fromSectionId) {
+      return { ...s, components: s.components.filter((c) => !idSet.has(c.id)) };
+    }
+    if (s.id === toSectionId) {
+      const next = s.components.slice();
+      const clamped = Math.max(0, Math.min(next.length, toIndex));
+      next.splice(clamped, 0, ...moving);
+      return { ...s, components: next };
+    }
+    return s;
+  });
+}
+
 function getEtagHeader(res: Response): string | null {
   const raw = res.headers.get("etag");
   if (!raw) return null;
@@ -2846,18 +2889,33 @@ export function App() {
                               if (targetIndex < 0) return prev;
                               const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
 
-                              const nextSections = moveComponentByIndex({
-                                sections: prev.sections,
-                                fromSectionId: actualFromSectionId,
-                                fromComponentId,
-                                toSectionId: section.id,
-                                toIndex,
-                              });
+                              const wantsGroupMove =
+                                selected?.sectionId === actualFromSectionId &&
+                                selectedComponentIds.length > 1 &&
+                                selectedComponentIds.includes(fromComponentId);
+
+                              const nextSections = wantsGroupMove
+                                ? moveComponentsByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentIds: selectedComponentIds,
+                                    toSectionId: section.id,
+                                    toIndex,
+                                  })
+                                : moveComponentByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentId,
+                                    toSectionId: section.id,
+                                    toIndex,
+                                  });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            if (selected?.componentId === fromComponentId) {
+                            if (selected?.sectionId && selectedComponentIds.length > 1 && selectedComponentIds.includes(fromComponentId)) {
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            } else if (selected?.componentId === fromComponentId) {
                               selectComponentSingle(section.id, fromComponentId);
                             }
                           }}
@@ -2873,18 +2931,33 @@ export function App() {
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
-                              const nextSections = moveComponentByIndex({
-                                sections: prev.sections,
-                                fromSectionId: actualFromSectionId,
-                                fromComponentId,
-                                toSectionId: section.id,
-                                toIndex: toSection.components.length,
-                              });
+                              const wantsGroupMove =
+                                selected?.sectionId === actualFromSectionId &&
+                                selectedComponentIds.length > 1 &&
+                                selectedComponentIds.includes(fromComponentId);
+
+                              const nextSections = wantsGroupMove
+                                ? moveComponentsByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentIds: selectedComponentIds,
+                                    toSectionId: section.id,
+                                    toIndex: toSection.components.length,
+                                  })
+                                : moveComponentByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentId,
+                                    toSectionId: section.id,
+                                    toIndex: toSection.components.length,
+                                  });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            if (selected?.componentId === fromComponentId) {
+                            if (selected?.sectionId && selectedComponentIds.length > 1 && selectedComponentIds.includes(fromComponentId)) {
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            } else if (selected?.componentId === fromComponentId) {
                               selectComponentSingle(section.id, fromComponentId);
                             }
                           }}
