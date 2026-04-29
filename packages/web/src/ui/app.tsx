@@ -333,8 +333,10 @@ type DragPayload =
 type DropPosition = "before" | "after";
 
 let inMemoryDragPayload: DragPayload | null = null;
+let inMemoryDragPayloadToken = 0;
 
 function setDragPayload(e: React.DragEvent, payload: DragPayload) {
+  inMemoryDragPayloadToken += 1;
   inMemoryDragPayload = payload;
   e.dataTransfer.effectAllowed = "move";
   const raw = JSON.stringify(payload);
@@ -345,6 +347,14 @@ function setDragPayload(e: React.DragEvent, payload: DragPayload) {
 
 function clearDragPayload() {
   inMemoryDragPayload = null;
+}
+
+function scheduleClearDragPayload(delayMs: number) {
+  const token = inMemoryDragPayloadToken;
+  setTimeout(() => {
+    if (token !== inMemoryDragPayloadToken) return;
+    clearDragPayload();
+  }, delayMs);
 }
 
 function getDragPayload(e: React.DragEvent): DragPayload | null {
@@ -2741,7 +2751,7 @@ export function App() {
                                 setDragPayload(e, { kind: "section", sectionId: section.id });
                               }}
                               onDragEnd={() => {
-                                setTimeout(() => clearDragPayload(), 0);
+                                scheduleClearDragPayload(0);
                                 setPreviewSectionDropHint(null);
                               }}
                               onClick={(e) => {
@@ -3247,14 +3257,14 @@ export function App() {
                             data-testid="structure-section-drag-handle"
                             draggable={canEdit && editingSectionLabelId !== section.id}
                             title="Drag to reorder section"
-                            onDragStart={(e) => {
-                              if (!canEdit) return;
-                              if (editingSectionLabelId === section.id) return;
-                              setDragPayload(e, { kind: "section", sectionId: section.id });
-                            }}
-                            onDragEnd={() => setTimeout(() => clearDragPayload(), 0)}
-                            onClick={(e) => e.stopPropagation()}
-                          >
+	                            onDragStart={(e) => {
+	                              if (!canEdit) return;
+	                              if (editingSectionLabelId === section.id) return;
+	                              setDragPayload(e, { kind: "section", sectionId: section.id });
+	                            }}
+	                            onDragEnd={() => scheduleClearDragPayload(0)}
+	                            onClick={(e) => e.stopPropagation()}
+	                          >
                             ⋮⋮
                           </span>
                         ) : null}
@@ -3416,60 +3426,118 @@ export function App() {
                         if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
                         setDragOverComponentSectionId((prev) => (prev === section.id ? null : prev));
                       }}
-                      onDropCapture={(e) => {
-                        if (!canEdit) return;
-                        const payload = getDragPayload(e);
+	                      onDropCapture={(e) => {
+	                        if (!canEdit) return;
+	                        const payload = getDragPayload(e);
+	                        if (!payload || payload.kind !== "component") return;
+	                        e.preventDefault();
+	                        e.stopPropagation();
+	                        clearDragPayload();
+	                        setDragOverComponentSectionId(null);
+	                        updatePage((prev) => {
+	                          const fromSection =
+	                            prev.sections.find((s) => s.id === payload.sectionId) ??
+	                            prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+	                          const toSection = prev.sections.find((s) => s.id === section.id);
+	                          if (!fromSection || !toSection) return prev;
+
+	                          const wantsGroupMove =
+	                            selected?.sectionId === fromSection.id &&
+	                            selectedComponentIds.length > 1 &&
+	                            selectedComponentIds.includes(payload.componentId);
+
+	                          if (!wantsGroupMove) {
+	                            const actualFromSectionId = fromSection.id;
+	                            const nextSections = moveComponentByIndex({
+	                              sections: prev.sections,
+	                              fromSectionId: actualFromSectionId,
+	                              fromComponentId: payload.componentId,
+	                              toSectionId: section.id,
+	                              toIndex: toSection.components.length,
+	                            });
+	                            return PageSchema.parse({ ...prev, sections: nextSections });
+	                          }
+
+	                          if (fromSection.id === toSection.id) return prev;
+	                          const fromIds = new Set(selectedComponentIds);
+	                          const moving = fromSection.components.filter((c) => fromIds.has(c.id));
+	                          if (!moving.length) return prev;
+
+	                          const nextSections = prev.sections.map((s) => {
+	                            if (s.id === fromSection.id) return { ...s, components: s.components.filter((c) => !fromIds.has(c.id)) };
+	                            if (s.id === toSection.id) return { ...s, components: [...s.components, ...moving] };
+	                            return s;
+	                          });
+
+	                          return PageSchema.parse({ ...prev, sections: nextSections });
+	                        });
+
+	                        if (
+	                          selected?.sectionId === payload.sectionId &&
+	                          selectedComponentIds.length > 1 &&
+	                          selectedComponentIds.includes(payload.componentId)
+	                        ) {
+	                          setSelected({ sectionId: section.id, componentId: payload.componentId });
+	                        } else if (selected?.componentId === payload.componentId) {
+	                          selectComponentSingle(section.id, payload.componentId);
+	                        }
+	                      }}
+	                      onDrop={(e) => {
+	                        if (!canEdit) return;
+	                        const payload = getDragPayload(e);
                         if (!payload || payload.kind !== "component") return;
                         e.preventDefault();
                         e.stopPropagation();
-                        clearDragPayload();
-                        setDragOverComponentSectionId(null);
-                        updatePage((prev) => {
-                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
-                          const toSection = prev.sections.find((s) => s.id === section.id);
-                          if (!fromSection || !toSection) return prev;
-                          const actualFromSectionId = fromSection.id;
-                          const nextSections = moveComponentByIndex({
-                            sections: prev.sections,
-                            fromSectionId: actualFromSectionId,
-                            fromComponentId: payload.componentId,
-                            toSectionId: section.id,
-                            toIndex: toSection.components.length,
-                          });
-                          return PageSchema.parse({ ...prev, sections: nextSections });
-                        });
+	                        clearDragPayload();
+	                        setDragOverComponentSectionId(null);
+	                        updatePage((prev) => {
+	                          const fromSection =
+	                            prev.sections.find((s) => s.id === payload.sectionId) ??
+	                            prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
+	                          const toSection = prev.sections.find((s) => s.id === section.id);
+	                          if (!fromSection || !toSection) return prev;
 
-                        if (selected?.componentId === payload.componentId) {
-                          selectComponentSingle(section.id, payload.componentId);
-                        }
-                      }}
-                      onDrop={(e) => {
-                        if (!canEdit) return;
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        clearDragPayload();
-                        setDragOverComponentSectionId(null);
-                        updatePage((prev) => {
-                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
-                          const toSection = prev.sections.find((s) => s.id === section.id);
-                          if (!fromSection || !toSection) return prev;
-                          const actualFromSectionId = fromSection.id;
-                          const nextSections = moveComponentByIndex({
-                            sections: prev.sections,
-                            fromSectionId: actualFromSectionId,
-                            fromComponentId: payload.componentId,
-                            toSectionId: section.id,
-                            toIndex: toSection.components.length,
-                          });
-                          return PageSchema.parse({ ...prev, sections: nextSections });
-                        });
+	                          const wantsGroupMove =
+	                            selected?.sectionId === fromSection.id &&
+	                            selectedComponentIds.length > 1 &&
+	                            selectedComponentIds.includes(payload.componentId);
 
-                        if (selected?.componentId === payload.componentId) {
-                          selectComponentSingle(section.id, payload.componentId);
-                        }
-                      }}
+	                          if (!wantsGroupMove) {
+	                            const actualFromSectionId = fromSection.id;
+	                            const nextSections = moveComponentByIndex({
+	                              sections: prev.sections,
+	                              fromSectionId: actualFromSectionId,
+	                              fromComponentId: payload.componentId,
+	                              toSectionId: section.id,
+	                              toIndex: toSection.components.length,
+	                            });
+	                            return PageSchema.parse({ ...prev, sections: nextSections });
+	                          }
+
+	                          if (fromSection.id === toSection.id) return prev;
+	                          const fromIds = new Set(selectedComponentIds);
+	                          const moving = fromSection.components.filter((c) => fromIds.has(c.id));
+	                          if (!moving.length) return prev;
+
+	                          const nextSections = prev.sections.map((s) => {
+	                            if (s.id === fromSection.id) return { ...s, components: s.components.filter((c) => !fromIds.has(c.id)) };
+	                            if (s.id === toSection.id) return { ...s, components: [...s.components, ...moving] };
+	                            return s;
+	                          });
+
+	                          return PageSchema.parse({ ...prev, sections: nextSections });
+	                        });
+
+	                        if (
+	                          selected?.sectionId === payload.sectionId &&
+	                          selectedComponentIds.length > 1 &&
+	                          selectedComponentIds.includes(payload.componentId)
+	                        ) {
+	                          setSelected({ sectionId: section.id, componentId: payload.componentId });
+	                        } else if (selected?.componentId === payload.componentId) {
+	                          selectComponentSingle(section.id, payload.componentId);
+	                        }
+	                      }}
                     >
                       Drop component here
                     </div>
@@ -3645,17 +3713,17 @@ function PreviewComponent(props: {
     onMoveHere(payload.sectionId, payload.componentId, position);
   };
 
-  const dragProps = {
-    draggable: canEdit && !isSelected,
-    onDragStart: (e: React.DragEvent) => {
-      if (!canEdit) return;
-      setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
-    },
-    onDragEnd: () => {
-      // In some browsers/automation harnesses, `drop` can race with `dragend`.
-      // Defer clearing so drop handlers can still read the in-memory payload if needed.
-      setTimeout(() => clearDragPayload(), 0);
-    },
+	  const dragProps = {
+	    draggable: canEdit,
+	    onDragStart: (e: React.DragEvent) => {
+	      if (!canEdit) return;
+	      setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
+	    },
+	    onDragEnd: () => {
+	      // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	      // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	      scheduleClearDragPayload(250);
+	    },
     onDragOverCapture: onDragOverTarget,
     onDragLeave: (e: React.DragEvent) => {
       const related = e.relatedTarget;
@@ -4565,11 +4633,11 @@ function Inspector(props: {
                 if (!canEdit) return;
                 setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
               }}
-              onDragEnd={() => {
-                // In some browsers/automation harnesses, `drop` can race with `dragend`.
-                // Defer clearing so drop handlers can still read the in-memory payload if needed.
-                setTimeout(() => clearDragPayload(), 50);
-              }}
+	              onDragEnd={() => {
+	                // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	                // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	                scheduleClearDragPayload(250);
+	              }}
               style={(() => {
                 const base = { justifyContent: "space-between" } as const;
                 const isSelected = selectedComponentIds.includes(c.id);
@@ -4621,11 +4689,11 @@ function Inspector(props: {
                     if (!canEdit) return;
                     setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
                   }}
-                  onDragEnd={() => {
-                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
-                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
-                    setTimeout(() => clearDragPayload(), 50);
-                  }}
+	                  onDragEnd={() => {
+	                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	                    scheduleClearDragPayload(250);
+	                  }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮
