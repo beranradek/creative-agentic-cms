@@ -738,6 +738,20 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   return AssetSchema.parse(asset);
 }
 
+async function apiCreatePlaceholderImage(
+  projectId: string,
+  input: { text: string; width?: number; height?: number; alt?: string }
+): Promise<Asset> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images/placeholder`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Failed to create placeholder (${res.status})`);
+  const json = (await res.json()) as unknown;
+  return AssetSchema.parse((json as { asset?: unknown }).asset);
+}
+
 async function apiReplaceImageAsset(
   projectId: string,
   assetId: string,
@@ -897,6 +911,8 @@ export function App() {
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
+  const [placeholderText, setPlaceholderText] = useState("Placeholder");
+  const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
@@ -1446,6 +1462,34 @@ export function App() {
       return next;
     });
   }, [activeProjectId, maxUploadPx, optimizeUploads, page, updatePage]);
+
+  const createPlaceholder = useCallback(async () => {
+    if (!page) return;
+    if (!canEdit) return;
+    setIsCreatingPlaceholder(true);
+    try {
+      const asset = await apiCreatePlaceholderImage(activeProjectId, { text: placeholderText, width: 1200, height: 800 });
+      updatePage((prev) =>
+        PageSchema.parse({
+          ...prev,
+          assets: [...prev.assets, asset],
+          sections: [
+            ...prev.sections,
+            {
+              ...createSection("Image"),
+              components: [createImageComponent(asset.id)],
+            },
+          ],
+        })
+      );
+      toast.success("Placeholder created", asset.filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Placeholder failed", message);
+    } finally {
+      setIsCreatingPlaceholder(false);
+    }
+  }, [activeProjectId, canEdit, page, placeholderText, toast, updatePage]);
 
   const uploadImageAssetOnly = useCallback(
     async (file: File) => {
@@ -2571,6 +2615,21 @@ export function App() {
                     <div className="stack">
                       <div className="card">
                         <div className="cardTitle">Images</div>
+                        <div className="field">
+                          <label>Placeholder</label>
+                          <div className="row" style={{ gap: 10 }}>
+                            <input
+                              value={placeholderText}
+                              disabled={!canEdit || isCreatingPlaceholder}
+                              onChange={(e) => setPlaceholderText(e.target.value)}
+                              placeholder="e.g. Product screenshot"
+                              style={{ flex: 1 }}
+                            />
+                            <button className="btn" disabled={!canEdit || isCreatingPlaceholder || !placeholderText.trim()} onClick={() => void createPlaceholder()}>
+                              Create
+                            </button>
+                          </div>
+                        </div>
                         <div className="row" style={{ alignItems: "flex-end" }}>
                           <label className="row" style={{ gap: 8, alignItems: "center", flex: 1 }}>
                             <input type="checkbox" checked={optimizeUploads} onChange={(e) => setOptimizeUploads(e.target.checked)} />

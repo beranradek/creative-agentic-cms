@@ -57,6 +57,7 @@ It is organized by milestones and designed to be executed incrementally with con
 
 - [x] Asset library:
   - [x] Upload images + store in `projects/<id>/assets`.
+  - [x] Create placeholder SVG images (quick layout blocks).
   - [x] Edit alt text (stored in `page.json`).
   - [x] Replace an existing image asset file (keep same `asset.id`).
   - [x] Set image focal point (x/y) for cropping & cover.
