@@ -88,6 +88,26 @@ test("editor can add content, upload image, save and reload", async ({ page }) =
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
 });
 
+test("editor can create placeholder image (SVG), save and reload", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_placeholder_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "images");
+  await page.getByTestId("placeholder-text").fill("Product screenshot");
+  await page.getByTestId("placeholder-create").click();
+
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
+
+  await saveAndReload(page);
+  await expect(page.locator(".imageBlock img")).toHaveCount(1);
+
+  const json = (await fetchPageJson(page, projectId)) as { assets?: Array<{ mimeType?: string; filename?: string }> };
+  const assets = json.assets ?? [];
+  expect(assets.some((a) => a.mimeType === "image/svg+xml" && typeof a.filename === "string" && a.filename.endsWith(".svg"))).toBe(true);
+});
+
 test("undo/redo works for adding a hero section", async ({ page }) => {
   await page.goto("/");
 

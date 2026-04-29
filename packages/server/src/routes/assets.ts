@@ -48,7 +48,11 @@ export function createAssetRouter(options: CreateAssetRouterOptions): express.Ro
     const assetsDir = store.getAssetsDir(projectId);
     await mkdir(assetsDir, { recursive: true });
 
-    const svg = renderPlaceholderSvg({ text, width, height });
+    const svg = renderPlaceholderSvg({
+      text,
+      ...(typeof width === "number" ? { width } : {}),
+      ...(typeof height === "number" ? { height } : {}),
+    });
     const targetPath = path.join(assetsDir, filename);
     await writeFile(targetPath, svg, "utf8");
 

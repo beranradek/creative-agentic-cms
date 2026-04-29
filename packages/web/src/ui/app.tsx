@@ -2619,13 +2619,19 @@ export function App() {
                           <label>Placeholder</label>
                           <div className="row" style={{ gap: 10 }}>
                             <input
+                              data-testid="placeholder-text"
                               value={placeholderText}
                               disabled={!canEdit || isCreatingPlaceholder}
                               onChange={(e) => setPlaceholderText(e.target.value)}
                               placeholder="e.g. Product screenshot"
                               style={{ flex: 1 }}
                             />
-                            <button className="btn" disabled={!canEdit || isCreatingPlaceholder || !placeholderText.trim()} onClick={() => void createPlaceholder()}>
+                            <button
+                              className="btn"
+                              data-testid="placeholder-create"
+                              disabled={!canEdit || isCreatingPlaceholder || !placeholderText.trim()}
+                              onClick={() => void createPlaceholder()}
+                            >
                               Create
                             </button>
                           </div>
