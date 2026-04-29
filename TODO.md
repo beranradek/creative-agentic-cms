@@ -37,7 +37,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Keyboard reordering (Alt+↑/↓).
 - [ ] Multi-select:
   - [x] Shift/Cmd selection of multiple components.
-  - [ ] Drag group between sections.
+  - [x] Drag group between sections.
 
 ## Milestone 3 — In-site Editing (WYSIWYG everywhere)
 
