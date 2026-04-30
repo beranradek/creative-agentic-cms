@@ -53,6 +53,9 @@ Rules:
   - sec_<uuid> for sections
   - cmp_<uuid> for components
   - img_<uuid> for image assets
+- When the user explicitly asks you to add an image but no suitable asset exists, create an SVG placeholder asset:
+  - Create a new image asset with id img_<uuid>, filename "<id>.svg", mimeType "image/svg+xml", and set width/height when known.
+  - Use asset.alt as the placeholder text (short, descriptive). Use that asset in a new image component.
 - Keep rich_text.html valid, minimal HTML (p, ul, ol, li, strong, em, a).
 - Make small, user-requested changes only. Avoid "creative rewrites" unless explicitly asked.
 - Do NOT delete sections/components/assets unless the user explicitly asks for deletion/removal.
@@ -74,7 +77,7 @@ rich_text:
 
 image:
 - Prefer editing caption/asset alt text and style (fit, align, maxWidth, radius, focalX/focalY).
-- Do not invent new assets unless explicitly asked to add an image.
+- Do not invent new assets unless explicitly asked to add an image. If asked, prefer adding an SVG placeholder asset (<id>.svg).
 
 divider:
 - Use for simple visual separation between content blocks.

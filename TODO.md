@@ -100,7 +100,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Prompt templates per component type.
 - [ ] Tools:
   - [x] Agent can request a refreshed screenshot.
-  - [ ] Agent can add images by generating prompts / placeholders (future).
+  - [x] Agent can add SVG placeholder images (auto-materialized on apply).
 
 ## Milestone 7 — Export (static site quality)
 
