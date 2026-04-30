@@ -21,6 +21,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Component-level settings: style tokens (typography, spacing, alignment) for all components.
   - [x] Strong defaults (required-but-nullable where needed for structured outputs).
 - [ ] Renderer parity:
+  - [x] Add “Server (saved)” preview mode in web UI (iframe) for parity checks.
   - [ ] Keep `web Preview` and `server export` rendering aligned (same semantics).
   - [ ] Add new components in both places (preview + export) together.
 
