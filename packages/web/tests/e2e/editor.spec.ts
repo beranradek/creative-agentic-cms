@@ -95,6 +95,7 @@ test("editor can create placeholder image (SVG), save and reload", async ({ page
   await loadProject(page, projectId);
 
   await ensurePaletteTab(page, "images");
+  await page.getByTestId("placeholder-size").selectOption("hero");
   await page.getByTestId("placeholder-text").fill("Product screenshot");
   await page.getByTestId("placeholder-create").click();
 
@@ -103,9 +104,20 @@ test("editor can create placeholder image (SVG), save and reload", async ({ page
   await saveAndReload(page);
   await expect(page.locator(".imageBlock img")).toHaveCount(1);
 
-  const json = (await fetchPageJson(page, projectId)) as { assets?: Array<{ mimeType?: string; filename?: string }> };
+  const json = (await fetchPageJson(page, projectId)) as {
+    assets?: Array<{ mimeType?: string; filename?: string; width?: number | null; height?: number | null }>;
+  };
   const assets = json.assets ?? [];
-  expect(assets.some((a) => a.mimeType === "image/svg+xml" && typeof a.filename === "string" && a.filename.endsWith(".svg"))).toBe(true);
+  expect(
+    assets.some(
+      (a) =>
+        a.mimeType === "image/svg+xml" &&
+        typeof a.filename === "string" &&
+        a.filename.endsWith(".svg") &&
+        a.width === 1200 &&
+        a.height === 630
+    )
+  ).toBe(true);
 });
 
 test("undo/redo works for adding a hero section", async ({ page }) => {

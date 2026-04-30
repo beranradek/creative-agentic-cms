@@ -912,6 +912,7 @@ export function App() {
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
   const [placeholderText, setPlaceholderText] = useState("Placeholder");
+  const [placeholderPreset, setPlaceholderPreset] = useState<"hero" | "square" | "landscape" | "portrait">("landscape");
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
   const [agentText, setAgentText] = useState("");
@@ -1468,7 +1469,14 @@ export function App() {
     if (!canEdit) return;
     setIsCreatingPlaceholder(true);
     try {
-      const asset = await apiCreatePlaceholderImage(activeProjectId, { text: placeholderText, width: 1200, height: 800 });
+      const preset: Record<typeof placeholderPreset, { width: number; height: number }> = {
+        hero: { width: 1200, height: 630 },
+        square: { width: 1024, height: 1024 },
+        landscape: { width: 1200, height: 800 },
+        portrait: { width: 900, height: 1200 },
+      };
+      const { width, height } = preset[placeholderPreset];
+      const asset = await apiCreatePlaceholderImage(activeProjectId, { text: placeholderText, width, height });
       updatePage((prev) =>
         PageSchema.parse({
           ...prev,
@@ -1489,7 +1497,7 @@ export function App() {
     } finally {
       setIsCreatingPlaceholder(false);
     }
-  }, [activeProjectId, canEdit, page, placeholderText, toast, updatePage]);
+  }, [activeProjectId, canEdit, page, placeholderPreset, placeholderText, toast, updatePage]);
 
   const uploadImageAssetOnly = useCallback(
     async (file: File) => {
@@ -2617,6 +2625,20 @@ export function App() {
                         <div className="cardTitle">Images</div>
                         <div className="field">
                           <label>Placeholder</label>
+                          <div className="field">
+                            <label>Size</label>
+                            <select
+                              data-testid="placeholder-size"
+                              value={placeholderPreset}
+                              disabled={!canEdit || isCreatingPlaceholder}
+                              onChange={(e) => setPlaceholderPreset(e.target.value as typeof placeholderPreset)}
+                            >
+                              <option value="landscape">Landscape (1200×800)</option>
+                              <option value="hero">Hero (1200×630)</option>
+                              <option value="square">Square (1024×1024)</option>
+                              <option value="portrait">Portrait (900×1200)</option>
+                            </select>
+                          </div>
                           <div className="row" style={{ gap: 10 }}>
                             <input
                               data-testid="placeholder-text"
