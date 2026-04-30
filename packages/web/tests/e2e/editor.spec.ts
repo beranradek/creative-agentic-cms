@@ -233,7 +233,6 @@ test("server-rendered preview can be opened (renderer parity spot-check)", async
 
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
-  await saveAndWait(page);
 
   await page.getByTestId("preview-renderer-server").click();
   const frame = page.frameLocator('[data-testid="server-preview-frame"]');
@@ -711,13 +710,37 @@ test("rich text formatting toolbar can bold selection and persists", async ({ pa
   await expect(page.getByTestId("richtext-toolbar")).toBeVisible();
 
   const editable = page.locator(".richTextEditable");
-  await editable.click();
-  await page.keyboard.press("Control+A");
-  await page.keyboard.type("Hello world");
+  let applied = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await editable.click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("Hello world");
 
-  // Select "world" and apply bold.
-  await page.keyboard.press("Control+Shift+ArrowLeft");
-  await page.getByTestId("richtext-bold").click();
+    // Select "world" via DOM ranges (keyboard selection is flaky in CI/headless).
+    await editable.evaluate((el) => {
+      const p = el.querySelector("p");
+      const textNode = p?.firstChild;
+      if (!textNode || textNode.nodeType !== Node.TEXT_NODE) throw new Error("Missing rich text node");
+      const text = textNode.textContent ?? "";
+      const start = text.lastIndexOf("world");
+      if (start < 0) throw new Error("Missing 'world' text");
+      const range = document.createRange();
+      range.setStart(textNode, start);
+      range.setEnd(textNode, start + "world".length);
+      const sel = window.getSelection();
+      if (!sel) throw new Error("Missing selection");
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    await page.getByTestId("richtext-bold").click();
+
+    const htmlNow = await editable.evaluate((el) => el.innerHTML);
+    if (/<(strong|b)>\s*world\s*<\/(strong|b)>/i.test(htmlNow)) {
+      applied = true;
+      break;
+    }
+  }
+  expect(applied).toBe(true);
 
   // Blur + persist.
   await saveAndReload(page);

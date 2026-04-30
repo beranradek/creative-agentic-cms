@@ -2794,9 +2794,19 @@ export function App() {
               <button
                 className={previewRenderer === "server" ? "btn btnPrimary" : "btn"}
                 data-testid="preview-renderer-server"
-                onClick={() => setPreviewRenderer("server")}
+                onClick={() =>
+                  void (async () => {
+                    if (page && canEdit && isDirty) {
+                      await save();
+                      if (pageJson !== null && lastSavedJsonRef.current !== pageJson) return;
+                    } else if (page && isDirty) {
+                      toast.info("Server preview uses saved page", "Save to refresh the server-rendered preview.");
+                    }
+                    setPreviewRenderer("server");
+                  })()
+                }
               >
-                Server
+                Server (saved)
               </button>
             </div>
             <select
@@ -4018,7 +4028,23 @@ function PreviewComponent(props: {
     const safeHtml = sanitizeRichTextHtml(component.html);
     if (isSelected && canEdit) {
       const runCommand = (command: string) => {
-        richTextRef.current?.focus();
+        const container = richTextRef.current;
+        if (!container) return;
+
+        const selectionBefore = window.getSelection();
+        const rangeBefore =
+          selectionBefore && selectionBefore.rangeCount > 0 ? selectionBefore.getRangeAt(0).cloneRange() : null;
+        const hadSelectionInside =
+          rangeBefore && container.contains(rangeBefore.commonAncestorContainer);
+
+        container.focus();
+        if (hadSelectionInside && rangeBefore) {
+          const selectionAfter = window.getSelection();
+          if (selectionAfter) {
+            selectionAfter.removeAllRanges();
+            selectionAfter.addRange(rangeBefore);
+          }
+        }
         try {
           document.execCommand(command);
         } catch {
