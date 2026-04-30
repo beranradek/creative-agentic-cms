@@ -1211,6 +1211,50 @@ test("exported HTML includes gradients and button styles", async ({ page }) => {
   expect(html).toContain("border-radius:6px;");
 });
 
+test("exported HTML includes divider styles", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_export_divider_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-divider").click();
+
+  const dividerItem = page.locator('[data-testid="preview-item"][data-component-type="divider"]');
+  await expect(dividerItem).toHaveCount(1);
+  await dividerItem.click();
+
+  await page.getByTestId("divider-style-thickness").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "6");
+  await page.getByTestId("divider-style-color").fill("#ff0000");
+  await page.getByTestId("divider-style-opacity").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "80");
+
+  await saveAndWait(page);
+  await page.getByTestId("export-site").click();
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).toContain('class="divider"');
+  expect(html).toContain("height:6px;");
+  expect(html).toContain("background:#ff0000;");
+  expect(html).toContain("opacity:0.8;");
+});
+
 test("can capture a preview screenshot (server Playwright required)", async ({ page }) => {
   test.skip(!process.env.CAC_E2E_SCREENSHOT, "Set CAC_E2E_SCREENSHOT=1 to enable.");
 

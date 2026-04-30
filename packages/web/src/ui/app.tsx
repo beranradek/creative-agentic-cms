@@ -5424,6 +5424,143 @@ function ComponentFields(props: {
     );
   }
 
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const opacity = component.style.opacity ?? 0.55;
+    const opacityPct = Math.round(opacity * 100);
+    return (
+      <div className="stack">
+        <div className="field">
+          <label>Thickness</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-thickness"
+              type="range"
+              min={1}
+              max={12}
+              value={thickness}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, thickness: Number(e.target.value) },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{thickness}px</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, thickness: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Color</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-color"
+              type="color"
+              value={component.style.color ?? "#000000"}
+              disabled={!canEdit}
+              onChange={(e) => onUpdate({ ...component, style: { ...component.style, color: e.target.value } })}
+            />
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, color: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Opacity</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-opacity"
+              type="range"
+              min={5}
+              max={100}
+              value={opacityPct}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, opacity: Number(e.target.value) / 100 },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{opacityPct}%</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, opacity: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Margin Y</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-marginy"
+              type="range"
+              min={0}
+              max={96}
+              value={marginY}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, marginY: Number(e.target.value) },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{marginY}px</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, marginY: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Max width</label>
+          <div className="row">
+            <select
+              data-testid="divider-style-maxwidth"
+              value={component.style.maxWidth ?? ""}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style:
+                    e.target.value === ""
+                      ? { ...component.style, maxWidth: null }
+                      : e.target.value === "480"
+                        ? { ...component.style, maxWidth: 480 }
+                        : e.target.value === "720"
+                          ? { ...component.style, maxWidth: 720 }
+                          : e.target.value === "980"
+                            ? { ...component.style, maxWidth: 980 }
+                            : { ...component.style, maxWidth: null },
+                })
+              }
+            >
+              <option value="">(auto)</option>
+              {COMPONENT_MAX_WIDTHS.map((w) => (
+                <option key={w} value={String(w)}>
+                  {w}
+                </option>
+              ))}
+            </select>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, maxWidth: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (component.type === "contact_form") {
     return (
       <div className="stack">
