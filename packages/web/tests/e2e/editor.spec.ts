@@ -1313,3 +1313,44 @@ test("agent can apply a simple edit (requires OPENAI_API_KEY on server)", async 
 
   await expect(page.locator(".hero h1")).toContainText(headline, { timeout: 60_000 });
 });
+
+test("agent can add an SVG placeholder image (server materializes asset file)", async ({ page }) => {
+  test.skip(!process.env.CAC_E2E_AGENT, "Set CAC_E2E_AGENT=1 to enable.");
+
+  await page.goto("/");
+  const projectId = `e2e_agent_placeholder_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await ensurePaletteTab(page, "agent");
+  await page.getByTestId("agent-run-mode").selectOption("apply");
+  await page.getByTestId("agent-text").fill(
+    [
+      "Add a new image component below the hero in the same section.",
+      "Use an SVG placeholder image sized exactly 800x450 with alt text \"Product screenshot\".",
+      "Set the image caption to \"Product screenshot\".",
+      "Do not change anything else.",
+    ].join(" ")
+  );
+  await page.getByTestId("agent-run").click();
+
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="image"]')).toHaveCount(1, {
+    timeout: 60_000,
+  });
+
+  const pageRes = await page.request.get(`/api/projects/${projectId}/page`);
+  expect(pageRes.ok()).toBeTruthy();
+  const data = (await pageRes.json()) as { page: { assets: Array<{ mimeType: string; filename: string; alt: string }> } };
+  const svgAsset = data.page.assets.find((a) => a.mimeType === "image/svg+xml");
+  expect(svgAsset).toBeTruthy();
+  if (!svgAsset) throw new Error("unreachable");
+  expect(svgAsset.filename).toMatch(/\\.svg$/);
+
+  const assetRes = await page.request.get(`/projects/${projectId}/assets/${svgAsset.filename}`);
+  expect(assetRes.ok()).toBeTruthy();
+  const svg = await assetRes.text();
+  expect(svg).toContain("<svg");
+  expect(svg).toContain("Product screenshot");
+});
