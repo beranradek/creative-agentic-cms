@@ -242,6 +242,37 @@ test("server-rendered preview can be opened (renderer parity spot-check)", async
   await expect(page.locator("text=Design. Compose. Publish.")).toBeVisible();
 });
 
+test("server draft preview can render unsaved changes", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_server_preview_draft_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await saveAndWait(page);
+
+  await page.route("**/api/projects/*/page", async (route) => {
+    if (route.request().method() === "PUT") {
+      await route.abort();
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.locator('[data-testid="preview-item"][data-component-type="hero"]').click();
+  const newHeadline = `Draft headline ${Date.now()}`;
+  const headline = page.locator(".hero h1");
+  await headline.click();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type(newHeadline);
+  await expect(page.locator(".hero h1")).toContainText(newHeadline);
+
+  await page.getByTestId("preview-renderer-server-draft").click();
+  const frame = page.frameLocator('[data-testid="server-preview-frame"]');
+  await expect(frame.locator(".hero h1")).toContainText(newHeadline);
+});
+
 test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
   await page.goto("/");
 
@@ -790,7 +821,11 @@ test("image can be replaced from Preview toolbar (uploads new asset)", async ({ 
   const before = await img.getAttribute("src");
   if (!before) throw new Error("missing img src");
 
-  await page.locator('[data-testid="preview-item"][data-component-type="image"]').click();
+  const previewImageItem = page.locator('[data-testid="preview-item"][data-component-type="image"]');
+  await previewImageItem.click();
+  await expect(page.locator(".previewItemSelected")).toHaveCount(1);
+  await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "image");
+  await previewImageItem.hover();
   await page.getByTestId("preview-image-replace-input").setInputFiles({
     name: "tiny2.png",
     mimeType: "image/png",

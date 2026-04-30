@@ -922,7 +922,9 @@ export function App() {
   const [placeholderPreset, setPlaceholderPreset] = useState<"hero" | "square" | "landscape" | "portrait">("landscape");
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
-  const [previewRenderer, setPreviewRenderer] = useState<"react" | "server">("react");
+  const [previewRenderer, setPreviewRenderer] = useState<"react" | "server_saved" | "server_draft">("react");
+  const [serverDraftHtml, setServerDraftHtml] = useState<string | null>(null);
+  const [isRenderingServerDraft, setIsRenderingServerDraft] = useState(false);
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [sttLang, setSttLang] = useState(() => {
@@ -1210,6 +1212,29 @@ export function App() {
       setIsSaving(false);
     }
   }, [flushAutosaveTimer, page, persistPage, projectId, toast]);
+
+  const renderServerDraft = useCallback(
+    async (pageToRender: Page) => {
+      setIsRenderingServerDraft(true);
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/preview/render`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(pageToRender),
+        });
+        const html = await res.text();
+        if (!res.ok) throw new Error(html || `Server draft render failed (${res.status})`);
+        setServerDraftHtml(html);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error("Server draft preview failed", message);
+        setServerDraftHtml(null);
+      } finally {
+        setIsRenderingServerDraft(false);
+      }
+    },
+    [activeProjectId, toast]
+  );
 
   const reloadAfterConflict = useCallback(() => {
     if (!conflict) return;
@@ -2807,7 +2832,7 @@ export function App() {
                 React
               </button>
               <button
-                className={previewRenderer === "server" ? "btn btnPrimary" : "btn"}
+                className={previewRenderer === "server_saved" ? "btn btnPrimary" : "btn"}
                 data-testid="preview-renderer-server"
                 onClick={() =>
                   void (async () => {
@@ -2817,12 +2842,40 @@ export function App() {
                     } else if (page && isDirty) {
                       toast.info("Server preview uses saved page", "Save to refresh the server-rendered preview.");
                     }
-                    setPreviewRenderer("server");
+                    setPreviewRenderer("server_saved");
                   })()
                 }
               >
                 Server (saved)
               </button>
+              <button
+                className={previewRenderer === "server_draft" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-server-draft"
+                disabled={!page}
+                onClick={() =>
+                  void (async () => {
+                    if (!page) return;
+                    setPreviewRenderer("server_draft");
+                    setServerDraftHtml(null);
+                    await renderServerDraft(page);
+                  })()
+                }
+              >
+                Server (draft)
+              </button>
+              {previewRenderer === "server_draft" ? (
+                <button
+                  className="btn"
+                  data-testid="preview-renderer-server-draft-refresh"
+                  disabled={!page || isRenderingServerDraft}
+                  onClick={() => {
+                    if (!page) return;
+                    void renderServerDraft(page);
+                  }}
+                >
+                  Refresh
+                </button>
+              ) : null}
             </div>
             <select
               aria-label="Preview viewport"
@@ -2857,11 +2910,30 @@ export function App() {
           <div className="canvas">
             <div className="previewViewport" style={previewDeviceWidth ? { maxWidth: previewDeviceWidth, margin: "0 auto" } : undefined}>
             <div className="preview">
-              {page ? previewRenderer === "server" ? (
+              {page ? previewRenderer === "server_saved" ? (
                 <iframe
                   data-testid="server-preview-frame"
-                  title="Server preview"
+                  title="Server preview (saved)"
                   src={`/api/projects/${encodeURIComponent(activeProjectId)}/preview`}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    minHeight: 520,
+                    border: "1px solid var(--line)",
+                    borderRadius: 12,
+                    background: "white",
+                  }}
+                />
+              ) : previewRenderer === "server_draft" ? (
+                <iframe
+                  data-testid="server-preview-frame"
+                  title="Server preview (draft)"
+                  srcDoc={
+                    serverDraftHtml ??
+                    `<!doctype html><html><head><meta charset="utf-8" /></head><body style="font-family: ui-sans-serif, system-ui; padding: 16px;">${
+                      isRenderingServerDraft ? "Rendering…" : "Click Refresh to render draft."
+                    }</body></html>`
+                  }
                   style={{
                     width: "100%",
                     height: "100%",
