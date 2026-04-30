@@ -347,6 +347,25 @@ test("components can be reordered via drag and drop within a section (Inspector 
     .toBe("contact_form");
 });
 
+test("inspector can add a divider into an existing section", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_add_divider_inline_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByTestId("inspector-add-divider").click();
+
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="divider"]')).toHaveCount(1);
+
+  await saveAndReload(page);
+  await expect(page.locator('[data-testid="preview-item"][data-component-type="divider"]')).toHaveCount(1);
+});
+
 test("inspector supports multi-select (shift) and bulk remove", async ({ page }) => {
   await page.goto("/");
 

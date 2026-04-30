@@ -4877,6 +4877,9 @@ function Inspector(props: {
           <button className="btn" onClick={() => add("rich_text")} disabled={!canEdit}>
             + Text
           </button>
+          <button className="btn" data-testid="inspector-add-divider" onClick={() => add("divider")} disabled={!canEdit}>
+            + Divider
+          </button>
           <button className="btn" onClick={() => add("contact_form")} disabled={!canEdit}>
             + Form
           </button>
