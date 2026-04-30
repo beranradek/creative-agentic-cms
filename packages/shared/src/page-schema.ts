@@ -64,10 +64,17 @@ export const PageThemeSchema = z
   })
   .default({});
 
+const AssetFilenameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
+  .refine((v) => !v.includes(".."), { message: "Asset filename must not contain '..'" });
+
 export const ImageAssetSchema = z.object({
   id: AssetIdSchema,
   type: z.literal("image"),
-  filename: z.string().min(1),
+  filename: AssetFilenameSchema,
   mimeType: z.string().min(1),
   width: z.number().int().positive().nullable().default(null),
   height: z.number().int().positive().nullable().default(null),

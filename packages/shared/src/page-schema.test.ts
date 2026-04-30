@@ -41,4 +41,13 @@ describe("PageSchema", () => {
     expect(c.style.marginY).toBeNull();
     expect(c.style.opacity).toBeNull();
   });
+
+  it("rejects unsafe asset filenames", () => {
+    expect(() =>
+      PageSchema.parse({
+        version: 1,
+        assets: [{ id: "img_1", type: "image", filename: "../img_1.png", mimeType: "image/png" }],
+      })
+    ).toThrow();
+  });
 });
