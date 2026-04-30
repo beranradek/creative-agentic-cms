@@ -225,6 +225,24 @@ test("sections can be reordered via drag and drop in Preview", async ({ page }) 
   expect(types[1]).toBe("hero");
 });
 
+test("server-rendered preview can be opened (renderer parity spot-check)", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_server_preview_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+  await saveAndWait(page);
+
+  await page.getByTestId("preview-renderer-server").click();
+  const frame = page.frameLocator('[data-testid="server-preview-frame"]');
+  await expect(frame.locator("text=Design. Compose. Publish.")).toBeVisible();
+
+  await page.getByTestId("preview-renderer-react").click();
+  await expect(page.locator("text=Design. Compose. Publish.")).toBeVisible();
+});
+
 test("components can be moved across sections via drag and drop in Preview", async ({ page }) => {
   await page.goto("/");
 

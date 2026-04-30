@@ -915,6 +915,7 @@ export function App() {
   const [placeholderPreset, setPlaceholderPreset] = useState<"hero" | "square" | "landscape" | "portrait">("landscape");
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
+  const [previewRenderer, setPreviewRenderer] = useState<"react" | "server">("react");
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [sttLang, setSttLang] = useState(() => {
@@ -2782,6 +2783,22 @@ export function App() {
         <div className="panelHeader">
           <h2>Preview</h2>
           <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <div className="row" style={{ gap: 6, alignItems: "center" }}>
+              <button
+                className={previewRenderer === "react" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-react"
+                onClick={() => setPreviewRenderer("react")}
+              >
+                React
+              </button>
+              <button
+                className={previewRenderer === "server" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-server"
+                onClick={() => setPreviewRenderer("server")}
+              >
+                Server
+              </button>
+            </div>
             <select
               aria-label="Preview viewport"
               data-testid="preview-viewport"
@@ -2815,7 +2832,21 @@ export function App() {
           <div className="canvas">
             <div className="previewViewport" style={previewDeviceWidth ? { maxWidth: previewDeviceWidth, margin: "0 auto" } : undefined}>
             <div className="preview">
-              {page ? (
+              {page ? previewRenderer === "server" ? (
+                <iframe
+                  data-testid="server-preview-frame"
+                  title="Server preview"
+                  src={`/api/projects/${encodeURIComponent(activeProjectId)}/preview`}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    minHeight: 520,
+                    border: "1px solid var(--line)",
+                    borderRadius: 12,
+                    background: "white",
+                  }}
+                />
+              ) : (
                 <div className="sitePreviewRoot" style={siteCssVarStyle}>
                 <div className="stack" style={{ gap: "var(--site-space-3)" }}>
                   {page.sections

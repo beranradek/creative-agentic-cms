@@ -14,6 +14,22 @@ export function createPreviewRouter(options: CreatePreviewRouterOptions): expres
   const { store, projectIdSchema } = options;
   const router = express.Router({ mergeParams: true });
 
+  router.get("/", async (req, res) => {
+    const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
+    const page = await store.readPage(projectId);
+    const { html, css } = renderPageHtml(page);
+
+    res
+      .status(200)
+      .type("html")
+      .send(
+        html.replace(
+          "</head>",
+          `<style>\n${css}\n</style>\n</head>`
+        )
+      );
+  });
+
   router.post("/screenshot", async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
     const body = z
