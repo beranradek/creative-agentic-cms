@@ -170,6 +170,13 @@ function createComponent(type: Component["type"]): Component {
       style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
+  if (type === "divider") {
+    return {
+      id: createId("cmp"),
+      type: "divider",
+      style: { thickness: null, color: null, maxWidth: null, marginY: null, opacity: null },
+    };
+  }
   if (type === "image") {
     throw new Error("Use createImageComponent(assetId) for image components.");
   }
@@ -2611,6 +2618,14 @@ export function App() {
                       </button>
                       <button
                         className="btn"
+                        data-testid="add-divider"
+                        onClick={() => addSectionWithComponent("divider", "Divider")}
+                        disabled={!canEdit}
+                      >
+                        Add Divider
+                      </button>
+                      <button
+                        className="btn"
                         data-testid="add-contact"
                         onClick={() => addSectionWithComponent("contact_form", "Contact")}
                         disabled={!canEdit}
@@ -4288,6 +4303,54 @@ function PreviewComponent(props: {
               </span>
             </button>
           </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const maxWidth = component.style.maxWidth ?? undefined;
+    const opacity = component.style.opacity ?? 0.55;
+    const color = component.style.color ?? "var(--line)";
+    const blockStyle: React.CSSProperties = {
+      maxWidth,
+      margin: `${marginY}px auto`,
+      width: "100%",
+      pointerEvents: "none",
+    };
+    return (
+      <div
+        className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
+        {...dragProps}
+        onClick={() => onSelect()}
+      >
+        {showToolbar ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
+              Delete
+            </button>
+          </div>
+        ) : null}
+        <div style={blockStyle}>
+          <hr
+            style={{
+              border: 0,
+              height: thickness,
+              background: color,
+              opacity,
+              borderRadius: Math.max(1, Math.floor(thickness / 2)),
+              margin: 0,
+              width: "100%",
+            }}
+          />
         </div>
       </div>
     );

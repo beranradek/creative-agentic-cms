@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "lint:typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm --filter @cac/shared build && pnpm -r test",
     "test:e2e": "pnpm --filter @cac/web test:e2e",
     "dev:server": "pnpm --filter @cac/server dev",
     "dev:web": "pnpm --filter @cac/web dev"

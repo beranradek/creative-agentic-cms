@@ -203,6 +203,29 @@ describe("renderPageHtml", () => {
     expect(html).toContain("justify-self:center");
   });
 
+  it("renders divider components", () => {
+    const page = PageSchema.parse({
+      version: 1,
+      metadata: { title: "t", description: "", lang: "en" },
+      assets: [],
+      sections: [
+        {
+          id: "s1",
+          label: "s",
+          settings: { visible: true, layout: "stack", gap: null, gridColumns: null },
+          style: {},
+          components: [{ id: "c1", type: "divider", style: { thickness: 4, color: "#ff0000", opacity: 0.8 } }],
+        },
+      ],
+    });
+
+    const { html } = renderPageHtml(page);
+    expect(html).toContain('class="divider"');
+    expect(html).toContain("height:4px");
+    expect(html).toContain("background:#ff0000");
+    expect(html).toContain("opacity:0.8");
+  });
+
   it("renders gradients and button inline styles", () => {
     const page = PageSchema.parse({
       version: 1,

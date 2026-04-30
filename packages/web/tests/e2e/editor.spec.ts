@@ -1018,6 +1018,7 @@ test("exported HTML includes section + image styles", async ({ page }) => {
 
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
+  await page.getByTestId("add-divider").click();
 
   await ensurePaletteTab(page, "images");
   await page.getByTestId("upload-image").setInputFiles({
@@ -1038,8 +1039,8 @@ test("exported HTML includes section + image styles", async ({ page }) => {
   }, "24");
 
   const sectionCards = page.getByTestId("structure-section-card");
-  await expect(sectionCards).toHaveCount(2);
-  await sectionCards.nth(1).getByRole("button", { name: "Select" }).click();
+  await expect(sectionCards).toHaveCount(3);
+  await sectionCards.nth(2).getByRole("button", { name: "Select" }).click();
 
   const imageRow = page.locator('[data-testid="inspector-component-row"][data-component-type="image"]');
   await expect(imageRow).toBeVisible();
@@ -1067,6 +1068,7 @@ test("exported HTML includes section + image styles", async ({ page }) => {
   expect(html).toContain('padding:24px;');
   expect(html).toContain('max-width:480px;');
   expect(html).toContain('border-radius:20px;');
+  expect(html).toContain('class="divider"');
 });
 
 test("exported HTML includes component box styles", async ({ page }) => {

@@ -26,4 +26,19 @@ describe("PageSchema", () => {
     expect(section.settings.gap).toBeNull();
     expect(section.settings.gridColumns).toBeNull();
   });
+
+  it("parses divider components with defaults", () => {
+    const parsed = PageSchema.parse({
+      version: 1,
+      sections: [{ id: "sec_1", components: [{ id: "cmp_1", type: "divider" }] }],
+    });
+    const c = parsed.sections[0]!.components[0]!;
+    expect(c.type).toBe("divider");
+    if (c.type !== "divider") throw new Error("Expected divider");
+    expect(c.style.thickness).toBeNull();
+    expect(c.style.color).toBeNull();
+    expect(c.style.maxWidth).toBeNull();
+    expect(c.style.marginY).toBeNull();
+    expect(c.style.opacity).toBeNull();
+  });
 });

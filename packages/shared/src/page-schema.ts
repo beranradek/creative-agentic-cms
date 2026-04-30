@@ -161,11 +161,26 @@ export const ContactFormComponentSchema = z.object({
     .default({}),
 });
 
+export const DividerComponentSchema = z.object({
+  id: ComponentIdSchema,
+  type: z.literal("divider"),
+  style: z
+    .object({
+      thickness: z.number().int().min(1).max(12).nullable().default(null),
+      color: BackgroundColorSchema,
+      maxWidth: ComponentMaxWidthSchema,
+      marginY: z.number().int().min(0).max(96).nullable().default(null),
+      opacity: z.number().min(0.05).max(1).nullable().default(null),
+    })
+    .default({}),
+});
+
 export const ComponentSchema = z.discriminatedUnion("type", [
   HeroComponentSchema,
   RichTextComponentSchema,
   ImageComponentSchema,
   ContactFormComponentSchema,
+  DividerComponentSchema,
 ]);
 
 export const SECTION_MAX_WIDTHS = [720, 980, 1200] as const;

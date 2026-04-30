@@ -76,6 +76,10 @@ image:
 - Prefer editing caption/asset alt text and style (fit, align, maxWidth, radius, focalX/focalY).
 - Do not invent new assets unless explicitly asked to add an image.
 
+divider:
+- Use for simple visual separation between content blocks.
+- Only edit style fields (thickness/color/maxWidth/marginY/opacity) when requested.
+
 contact_form:
 - Only edit headline and submitLabel (no new fields).
 - Avoid changing form semantics unless explicitly requested.
@@ -182,6 +186,16 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
     if (component.style.radius !== null) styleParts.push(`radius=${component.style.radius}px`);
     const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
     return `image: asset=${component.assetId} file=${file}${styleText} caption="${truncate(component.caption, 80)}"`;
+  }
+  if (component.type === "divider") {
+    const styleParts: string[] = [];
+    if (component.style.thickness !== null) styleParts.push(`thickness=${component.style.thickness}px`);
+    if (component.style.color) styleParts.push(`color=${component.style.color}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.marginY !== null) styleParts.push(`marginY=${component.style.marginY}px`);
+    if (component.style.opacity !== null) styleParts.push(`opacity=${component.style.opacity}`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `divider${styleText}`;
   }
   if (component.type === "contact_form") {
     const styleParts: string[] = [];

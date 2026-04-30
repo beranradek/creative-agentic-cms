@@ -121,6 +121,24 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>, o
     return `<div class="richText"${styleAttr}>${safe}</div>`;
   }
 
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const maxWidth = component.style.maxWidth;
+    const opacity = component.style.opacity ?? 0.55;
+    const color = component.style.color ?? "var(--line)";
+    const styles: string[] = [];
+    styles.push("border:0;");
+    styles.push(`height:${thickness}px;`);
+    styles.push(`background:${escapeHtml(color)};`);
+    styles.push(`opacity:${opacity};`);
+    styles.push(`border-radius:${Math.max(1, Math.floor(thickness / 2))}px;`);
+    styles.push(`margin:${marginY}px auto;`);
+    styles.push("width:100%;");
+    if (maxWidth !== null) styles.push(`max-width:${maxWidth}px;`);
+    return `<hr class="divider" style="${styles.join("")}" />`;
+  }
+
   if (component.type === "image") {
     const asset = assetsById.get(component.assetId);
     if (!asset || asset.type !== "image") return "";
