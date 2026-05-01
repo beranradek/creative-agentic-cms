@@ -902,7 +902,7 @@ export function App() {
   const siteCssVars = useMemo(() => resolvedThemeToCssVars(resolvedSiteTheme), [resolvedSiteTheme]);
   const siteCssVarStyle = useMemo(() => siteCssVars as unknown as React.CSSProperties, [siteCssVars]);
   const isDirty = pageJson !== null && lastSavedJsonRef.current !== pageJson;
-  const canEdit = state.kind === "ready" && loadedProjectId === projectId;
+  const canEdit = state.kind === "ready" && loadedProjectId === projectId && !isAgentRunning;
   const activeProjectId = loadedProjectId;
   const canUndo = canEdit && state.kind === "ready" && state.editor.past.length > 0;
   const canRedo = canEdit && state.kind === "ready" && state.editor.future.length > 0;
@@ -2265,6 +2265,11 @@ export function App() {
                           {agentDiffSummary.components.changed}, reorders s:{agentDiffSummary.sections.reordered ? "yes" : "no"} c:
                           {agentDiffSummary.components.reorderedWithinSections}; assets +{agentDiffSummary.assets.added}/-{agentDiffSummary.assets.removed}; JSON Δ{" "}
                           {agentDiffSummary.approxJsonDeltaChars}
+                        </div>
+                      ) : null}
+                      {isAgentRunning ? (
+                        <div className="muted" style={{ marginTop: 8 }} data-testid="agent-edit-lock">
+                          Page editing is paused while the agent is running.
                         </div>
                       ) : null}
                       {agentReply ? <div className="muted">{agentReply}</div> : <div className="muted">Uses `OPENAI_API_KEY` from `.env`.</div>}
