@@ -57,12 +57,6 @@ const PALETTE_TAB_TITLES: Record<PaletteTab, string> = {
   agent: "Agent",
 };
 
-declare global {
-  interface Window {
-    __CAC_API_TOKEN__?: string;
-  }
-}
-
 type ComponentBoxStyle = {
   blockAlign: (typeof TEXT_ALIGNS)[number] | null;
   textAlign: (typeof TEXT_ALIGNS)[number] | null;
@@ -339,7 +333,7 @@ function sanitizeRichTextHtml(inputHtml: string): string {
 }
 
 function sanitizeInlineText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(/\s+/g, " ").replace(/[<>]/g, "").trim();
 }
 
 type DropPosition = "before" | "after";
@@ -448,6 +442,11 @@ class ApiConflictError extends Error {
 let apiSessionToken: string | null = null;
 let apiSessionPromise: Promise<string> | null = null;
 
+function clearApiSessionToken(): void {
+  apiSessionToken = null;
+  apiSessionPromise = null;
+}
+
 async function ensureApiSessionToken(): Promise<string> {
   if (apiSessionToken) return apiSessionToken;
   if (!apiSessionPromise) {
@@ -463,20 +462,32 @@ async function ensureApiSessionToken(): Promise<string> {
       }
       const token = API_SESSION_SCHEMA.parse(json).token;
       apiSessionToken = token;
-      window.__CAC_API_TOKEN__ = token;
       return token;
-    })().finally(() => {
-      apiSessionPromise = null;
-    });
+    })();
   }
-  return apiSessionPromise;
+  try {
+    const token = await apiSessionPromise;
+    return token;
+  } catch (error) {
+    clearApiSessionToken();
+    throw error;
+  } finally {
+    apiSessionPromise = null;
+  }
 }
 
-async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+async function apiFetch(input: string, init?: RequestInit, allowRetry = true): Promise<Response> {
   const token = await ensureApiSessionToken();
   const headers = new Headers(init?.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  const res = await fetch(input, { ...init, headers });
+  if (res.status !== 401 || !allowRetry) return res;
+
+  clearApiSessionToken();
+  const retryToken = await ensureApiSessionToken();
+  const retryHeaders = new Headers(init?.headers);
+  retryHeaders.set("authorization", `Bearer ${retryToken}`);
+  return fetch(input, { ...init, headers: retryHeaders });
 }
 
 async function apiGetPage(projectId: string): Promise<{ page: Page; etag: string | null }> {

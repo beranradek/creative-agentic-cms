@@ -6,15 +6,23 @@ const PNG_2X2_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwHwyBNBAw/AcAR8oI+ItOQ4UAAAAASUVORK5CYII=";
 
 async function fetchPageJson(page: import("@playwright/test").Page, projectId: string) {
-  return await page.evaluate(async (pid) => {
-    const token = (window as Window & { __CAC_API_TOKEN__?: string }).__CAC_API_TOKEN__;
-    if (!token) throw new Error("Missing API session token");
+  const token = await page.evaluate(async () => {
+    const res = await fetch("/api/session");
+    const json = (await res.json()) as { token?: string; error?: string };
+    if (!res.ok || !json.token) throw new Error(json.error ?? `Session error (${res.status})`);
+    return json.token;
+  });
+
+  return await page.evaluate(async ({ pid, token: sessionToken }) => {
     const res = await fetch(`/api/projects/${encodeURIComponent(pid)}/page`, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${sessionToken}` },
     });
-    const json = (await res.json()) as { page?: unknown };
-    return json.page;
-  }, projectId);
+    const json = (await res.json().catch(() => null)) as { page?: unknown; error?: string } | null;
+    if (!res.ok) {
+      throw new Error(json?.error ?? `Failed to fetch page.json (${res.status})`);
+    }
+    return json?.page;
+  }, { pid: projectId, token });
 }
 
 async function loadProject(page: import("@playwright/test").Page, projectId: string) {
@@ -72,6 +80,68 @@ test("project page API requires auth and invalid ids are sanitized", async ({ pa
   expect(invalidBody.error).toBe("Invalid projectId.");
   expect(JSON.stringify(invalidBody)).not.toContain("ZodError");
   expect(JSON.stringify(invalidBody)).not.toContain("stack");
+});
+
+test("editor retries with a fresh session after a stale-token 401", async ({ page }) => {
+  const projectId = `e2e_session_retry_${Date.now()}`;
+
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    let projectRequestCount = 0;
+    let sessionRequestCount = 0;
+    let injectedUnauthorizedCount = 0;
+
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes("/api/session")) {
+        sessionRequestCount += 1;
+      }
+      if (url.includes("/api/projects/") && url.includes("/page")) {
+        projectRequestCount += 1;
+        if (projectRequestCount === 1) {
+          injectedUnauthorizedCount += 1;
+          return new Response(JSON.stringify({ error: "Unauthorized." }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      return originalFetch(input, init);
+    };
+
+    (window as Window & {
+      __CAC_TEST_SESSION_RETRY__?: {
+        getCounts: () => {
+          projectRequestCount: number;
+          sessionRequestCount: number;
+          injectedUnauthorizedCount: number;
+        };
+      };
+    }).__CAC_TEST_SESSION_RETRY__ = {
+      getCounts: () => ({ projectRequestCount, sessionRequestCount, injectedUnauthorizedCount }),
+    };
+  });
+
+  await page.goto("/");
+  await loadProject(page, projectId);
+
+  const counts = await page.evaluate(() => {
+    const testState = (window as Window & {
+      __CAC_TEST_SESSION_RETRY__?: {
+        getCounts: () => {
+          projectRequestCount: number;
+          sessionRequestCount: number;
+          injectedUnauthorizedCount: number;
+        };
+      };
+    }).__CAC_TEST_SESSION_RETRY__;
+    if (!testState) throw new Error("Missing session retry test state");
+    return testState.getCounts();
+  });
+
+  expect(counts.projectRequestCount).toBeGreaterThanOrEqual(2);
+  expect(counts.sessionRequestCount).toBeGreaterThanOrEqual(2);
+  expect(counts.injectedUnauthorizedCount).toBe(1);
 });
 
 test("editor can add content, upload image, save and reload", async ({ page }) => {
@@ -495,7 +565,7 @@ test("section label can be renamed from Sections and persists", async ({ page })
   await ensurePaletteTab(page, "sections");
   const sectionCard = page.getByTestId("sections-section-card").first();
   await sectionCard.getByTestId("section-label").dblclick();
-  await page.getByTestId("section-label-input").fill("Above the fold");
+  await page.getByTestId("section-label-input").fill("<Above>   the   fold");
   await page.getByTestId("section-label-input").press("Enter");
   await expect(sectionCard).toContainText("Above the fold");
 
@@ -663,12 +733,22 @@ test("rich text formatting toolbar can bold selection and persists", async ({ pa
   await page.getByTestId("save-page").click();
   await page.getByTestId("reload-page").click();
 
-  const pageJson = (await fetchPageJson(page, projectId)) as {
-    sections: Array<{ components: Array<{ type: string; html?: string }> }>;
-  };
-  const html = pageJson.sections[0]?.components[0]?.html ?? "";
-  expect(html).toContain("<strong>");
-  expect(html).toContain("world");
+  await expect
+    .poll(async () => {
+      const currentPage = (await fetchPageJson(page, projectId)) as {
+        sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+      };
+      return currentPage.sections[0]?.components[0]?.html ?? "";
+    })
+    .toContain("<strong>");
+  await expect
+    .poll(async () => {
+      const currentPage = (await fetchPageJson(page, projectId)) as {
+        sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+      };
+      return currentPage.sections[0]?.components[0]?.html ?? "";
+    })
+    .toContain("world");
 });
 
 test("image can be replaced from Preview toolbar (uploads new asset)", async ({ page }) => {

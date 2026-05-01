@@ -48,6 +48,7 @@ const ProjectIdSchema = z
   .string()
   .min(1)
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/);
+const SESSION_CACHE_CONTROL = "no-store, private";
 
 function getRequestOrigin(req: express.Request): string | null {
   const originHeader = req.header("origin");
@@ -83,14 +84,27 @@ function requireEditorSession(req: express.Request, res: express.Response, next:
   res.status(401).json({ error: "Unauthorized." });
 }
 
-function getProjectIdOrRespond(req: express.Request, res: express.Response): string | null {
-  const parsed = ProjectIdSchema.safeParse(req.params.projectId);
-  if (parsed.success) return parsed.data;
-  res.status(400).json({ error: "Invalid projectId." });
-  return null;
+function getValidatedProjectId(res: express.Response): string {
+  return res.locals.projectId as string;
 }
 
+app.param("projectId", (req, res, next, rawProjectId) => {
+  const parsed = ProjectIdSchema.safeParse(rawProjectId);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid projectId." });
+    return;
+  }
+  req.params.projectId = parsed.data;
+  res.locals.projectId = parsed.data;
+  next();
+});
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 app.get("/api/session", (req, res) => {
+  res.setHeader("Cache-Control", SESSION_CACHE_CONTROL);
   if (!isTrustedEditorOrigin(getRequestOrigin(req))) {
     res.status(401).json({ error: "Editor session unavailable for this origin." });
     return;
@@ -117,12 +131,11 @@ app.post("/api/projects", requireEditorSession, async (req, res) => {
 });
 
 app.get("/api/projects/:projectId/page", async (req, res, next) => {
-  const projectId = getProjectIdOrRespond(req, res);
-  if (!projectId) return;
+  const projectId = getValidatedProjectId(res);
   res.locals.projectId = projectId;
   next();
 }, requireEditorSession, async (req, res) => {
-  const projectId = res.locals.projectId as string;
+  const projectId = getValidatedProjectId(res);
   try {
     const { page, etag } = await store.readPageWithEtag(projectId);
     res.setHeader("ETag", etag);
@@ -146,12 +159,11 @@ app.get("/api/projects/:projectId/page", async (req, res, next) => {
 });
 
 app.put("/api/projects/:projectId/page", async (req, res, next) => {
-  const projectId = getProjectIdOrRespond(req, res);
-  if (!projectId) return;
+  const projectId = getValidatedProjectId(res);
   res.locals.projectId = projectId;
   next();
 }, requireEditorSession, async (req, res) => {
-  const projectId = res.locals.projectId as string;
+  const projectId = getValidatedProjectId(res);
   const force = z
     .enum(["1", "true"])
     .optional()
