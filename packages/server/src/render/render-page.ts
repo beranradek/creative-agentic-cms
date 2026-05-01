@@ -239,7 +239,8 @@ function renderSection(section: Section, assetsById: Map<string, Asset>, options
   }
   if (section.style.padding !== null) styles.push(`padding:${section.style.padding}px;`);
   if (section.style.maxWidth !== null) styles.push(`max-width:${section.style.maxWidth}px;margin:0 auto;`);
-  if ((sectionGradientFrom && sectionGradientTo) || section.style.background || section.style.padding !== null) styles.push("border-radius:18px;");
+  if ((sectionGradientFrom && sectionGradientTo) || section.style.background || section.style.padding !== null)
+    styles.push("border-radius:var(--site-radius);");
 
   const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
 

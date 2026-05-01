@@ -14,7 +14,7 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 1 — Editor Model (schema + rendering)
 
-- [ ] Expand `@cac/shared` schema:
+- [x] Expand `@cac/shared` schema:
   - [x] Section style: background, padding, max-width.
   - [x] Section-level settings: layout (stack/grid), spacing, visibility.
   - [x] Image component style: fit, align, max-width, radius.
@@ -36,7 +36,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Move components across sections via Structure list (optional).
   - [x] Insert indicators (drop marker line) + auto-scroll while dragging.
   - [x] Keyboard reordering (Alt+↑/↓).
-- [ ] Multi-select:
+- [x] Multi-select:
   - [x] Shift/Cmd selection of multiple components.
   - [x] Drag group between sections.
 

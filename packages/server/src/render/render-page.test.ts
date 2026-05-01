@@ -264,7 +264,7 @@ describe("renderPageHtml", () => {
     expect(html).toContain("background:linear-gradient(180deg, #abcdef, #123456)");
     expect(html).toContain('class="cta"');
     expect(html).toContain("background:transparent;");
-    expect(html).toContain("border-radius:18px;");
+    expect(html).toContain("border-radius:var(--site-radius);");
     expect(html).toContain("color:#ff0000;");
     expect(html).toContain("border-color:#00ff00;");
     expect(html).toContain("background:#0000ff;");
