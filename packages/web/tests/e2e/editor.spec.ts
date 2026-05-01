@@ -1134,6 +1134,11 @@ test("exported section radius follows explicit theme override", async ({ page })
   expect(cssRes.ok()).toBeTruthy();
   const css = await cssRes.text();
   expect(css).toContain("--site-radius:6px;");
+
+  const htmlRes = await page.request.get(`/projects/${projectId}/output/index.html`);
+  expect(htmlRes.ok()).toBeTruthy();
+  const html = await htmlRes.text();
+  expect(html).toContain("border-radius:var(--site-radius);");
 });
 
 test("exported HTML includes section + image styles", async ({ page }) => {
