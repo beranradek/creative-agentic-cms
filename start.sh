@@ -124,7 +124,7 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 
-if ! wait_for_url "http://127.0.0.1:5174/api/projects" 30000; then
+if ! wait_for_url "http://127.0.0.1:5174/api/health" 30000; then
   echo "[start] server did not become ready" >&2
   tail -n 40 "$LOG_FILE" >&2 || true
   exit 1
