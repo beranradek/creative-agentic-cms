@@ -21,6 +21,32 @@ Options:
 EOF
 }
 
+wait_for_url() {
+  local url="$1"
+  local timeout_ms="$2"
+
+  node - "$url" "$timeout_ms" <<'EOF'
+const [url, timeoutRaw] = process.argv.slice(2);
+const timeoutMs = Number(timeoutRaw);
+const startedAt = Date.now();
+
+async function main() {
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+    } catch {
+      // Keep polling until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  process.exitCode = 1;
+}
+
+await main();
+EOF
+}
+
 FOREGROUND=0
 SKIP_INSTALL=0
 for arg in "${@:-}"; do
@@ -87,3 +113,27 @@ echo $! >"$PID_FILE"
 echo "[start] running in background (pid $(cat "$PID_FILE"))"
 echo "[start] logs: $LOG_FILE"
 
+START_PID="$(cat "$PID_FILE")"
+for _ in $(seq 1 20); do
+  if ! kill -0 "$START_PID" 2>/dev/null; then
+    echo "[start] dev process exited during startup" >&2
+    tail -n 40 "$LOG_FILE" >&2 || true
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+  sleep 0.5
+done
+
+if ! wait_for_url "http://127.0.0.1:5174/api/projects" 30000; then
+  echo "[start] server did not become ready" >&2
+  tail -n 40 "$LOG_FILE" >&2 || true
+  exit 1
+fi
+
+if ! wait_for_url "http://127.0.0.1:5173" 30000; then
+  echo "[start] web UI did not become ready" >&2
+  tail -n 40 "$LOG_FILE" >&2 || true
+  exit 1
+fi
+
+echo "[start] ready"

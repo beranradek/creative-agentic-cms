@@ -174,10 +174,14 @@ body {
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   border-right: 1px solid var(--line);
   background: rgba(248, 250, 252, 0.9);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  min-height: 0;
 }
 
 .paletteTabBtn {

@@ -6,6 +6,7 @@ const EnvSchema = z.object({
   DATA_DIR: z.string().default("./projects"),
   WORKSPACE_DIR: z.string().default("./.workspace"),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://127.0.0.1:5173"),
+  API_SESSION_TOKEN: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().optional(),
   IMAGEGEN_MODEL: z.string().default("gpt-image-1"),
 });

@@ -9,7 +9,6 @@ import {
   SECTION_GRID_COLUMNS,
   SECTION_LAYOUTS,
   SECTION_MAX_WIDTHS,
-  THEME_PRESETS,
   TEXT_ALIGNS,
   resolveTheme,
   resolvedThemeToCssVars,
@@ -18,6 +17,8 @@ import {
   type Page,
   type Section,
 } from "@cac/shared";
+import { clearDragPayload, getDragPayload, setDragPayload } from "./editor-dnd.js";
+import { PageMetadataPanel, SectionsPanel, ThemePanel } from "./palette-panels.js";
 import { isSttSupported, startStt, stopStt } from "./stt.js";
 import { useToast } from "./toast.js";
 
@@ -41,10 +42,26 @@ type ImageEditorState =
       replaceAllUsages: boolean;
     };
 
-type PaletteTab = "project" | "agent" | "add" | "assets";
+type PaletteTab = "project" | "page" | "theme" | "sections" | "add" | "assets" | "agent";
 
 const DEFAULT_PROJECT_ID = "demo";
 const UNDO_LIMIT = 50;
+const API_SESSION_SCHEMA = z.object({ token: z.string().min(1) });
+const PALETTE_TAB_TITLES: Record<PaletteTab, string> = {
+  project: "Project",
+  page: "Page",
+  theme: "Theme",
+  sections: "Sections",
+  add: "Add blocks",
+  assets: "Images + Assets",
+  agent: "Agent",
+};
+
+declare global {
+  interface Window {
+    __CAC_API_TOKEN__?: string;
+  }
+}
 
 type ComponentBoxStyle = {
   blockAlign: (typeof TEXT_ALIGNS)[number] | null;
@@ -325,53 +342,7 @@ function sanitizeInlineText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-type DragPayload =
-  | { kind: "section"; sectionId: string }
-  | { kind: "component"; sectionId: string; componentId: string };
-
 type DropPosition = "before" | "after";
-
-let inMemoryDragPayload: DragPayload | null = null;
-
-function setDragPayload(e: React.DragEvent, payload: DragPayload) {
-  inMemoryDragPayload = payload;
-  e.dataTransfer.effectAllowed = "move";
-  const raw = JSON.stringify(payload);
-  // Some browsers / automation harnesses only preserve `text/plain` during HTML5 DnD.
-  e.dataTransfer.setData("application/x-cac", raw);
-  e.dataTransfer.setData("text/plain", raw);
-}
-
-function clearDragPayload() {
-  inMemoryDragPayload = null;
-}
-
-function getDragPayload(e: React.DragEvent): DragPayload | null {
-  const candidates = [e.dataTransfer.getData("application/x-cac"), e.dataTransfer.getData("text/plain")].filter(
-    (v) => v && v.trim().length
-  );
-  for (const raw of candidates) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object") continue;
-      const kind = (parsed as { kind?: unknown }).kind;
-      if (kind === "section") {
-        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
-        if (typeof sectionId === "string" && sectionId.length) return { kind: "section", sectionId };
-      }
-      if (kind === "component") {
-        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
-        const componentId = (parsed as { componentId?: unknown }).componentId;
-        if (typeof sectionId === "string" && sectionId.length && typeof componentId === "string" && componentId.length) {
-          return { kind: "component", sectionId, componentId };
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return inMemoryDragPayload;
-}
 
 function computeDropPosition(rect: DOMRect, clientY: number): DropPosition {
   const mid = rect.top + rect.height / 2;
@@ -474,8 +445,42 @@ class ApiConflictError extends Error {
   }
 }
 
+let apiSessionToken: string | null = null;
+let apiSessionPromise: Promise<string> | null = null;
+
+async function ensureApiSessionToken(): Promise<string> {
+  if (apiSessionToken) return apiSessionToken;
+  if (!apiSessionPromise) {
+    apiSessionPromise = (async () => {
+      const res = await fetch("/api/session");
+      const json = (await res.json().catch(() => null)) as unknown;
+      if (!res.ok) {
+        const message =
+          json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string"
+            ? (json as { error: string }).error
+            : `Session error (${res.status})`;
+        throw new Error(message);
+      }
+      const token = API_SESSION_SCHEMA.parse(json).token;
+      apiSessionToken = token;
+      window.__CAC_API_TOKEN__ = token;
+      return token;
+    })().finally(() => {
+      apiSessionPromise = null;
+    });
+  }
+  return apiSessionPromise;
+}
+
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const token = await ensureApiSessionToken();
+  const headers = new Headers(init?.headers);
+  headers.set("authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
 async function apiGetPage(projectId: string): Promise<{ page: Page; etag: string | null }> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/page`);
   if (!res.ok) throw new Error(`Failed to load page (${res.status})`);
   const json = (await res.json()) as unknown;
   const page = (json as { page?: unknown }).page;
@@ -492,7 +497,7 @@ async function apiPutPage(
   const etag = options?.etag ?? null;
   if (etag) headers["if-match"] = etag;
 
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/page${query}`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/page${query}`, {
     method: "PUT",
     headers,
     body: JSON.stringify(page),
@@ -558,7 +563,7 @@ async function apiAgentChat(
 }> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (etag) headers["if-match"] = etag;
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/chat`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/agent/chat`, {
     method: "POST",
     headers,
     body: JSON.stringify({ message, mode, screenshotUrl }),
@@ -612,7 +617,7 @@ async function apiApplyAgentProposal(
 ): Promise<{ page: Page; diffSummary: DiffSummary; pageEtag: string | null }> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (etag) headers["if-match"] = etag;
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/agent/apply`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/agent/apply`, {
     method: "POST",
     headers,
     body: JSON.stringify({ message, basePage, proposedPage }),
@@ -636,7 +641,7 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   const form = new FormData();
   form.append("file", file);
   if (alt) form.append("alt", alt);
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images`, {
     method: "POST",
     body: form,
   });
@@ -656,7 +661,7 @@ async function apiReplaceImageAsset(
   form.append("file", file);
   const headers: Record<string, string> = {};
   if (etag) headers["if-match"] = etag;
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/projects/${encodeURIComponent(projectId)}/assets/images/${encodeURIComponent(assetId)}/replace`,
     { method: "POST", body: form, headers }
   );
@@ -681,7 +686,7 @@ async function apiGenerateImage(
   size: string,
   quality: string
 ): Promise<{ jobId: string }> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/generate`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, size, quality }),
@@ -695,14 +700,14 @@ async function apiPollImageJob(
   projectId: string,
   jobId: string
 ): Promise<{ status: string; tempImageId?: string; error?: string }> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/job/${encodeURIComponent(jobId)}`);
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/imagegen/job/${encodeURIComponent(jobId)}`);
   const json = (await res.json()) as unknown;
   if (!res.ok) throw new Error((json as { error?: string }).error ?? `Poll failed (${res.status})`);
   return json as { status: string; tempImageId?: string; error?: string };
 }
 
 async function apiSaveGeneratedImage(projectId: string, tempImageId: string, alt?: string): Promise<Asset> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/projects/${encodeURIComponent(projectId)}/imagegen/save/${encodeURIComponent(tempImageId)}`,
     {
       method: "POST",
@@ -767,7 +772,7 @@ async function downscaleImageFile(file: File, maxDimensionPx: number): Promise<F
 }
 
 async function apiExport(projectId: string): Promise<{ outputDir: string }> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({}),
@@ -788,7 +793,7 @@ async function apiCaptureScreenshot(
   const width = options?.width ?? 1024;
   const height = options?.height ?? 768;
   const fullPage = options?.fullPage ?? false;
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/preview/screenshot`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/preview/screenshot`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ width, height, fullPage }),
@@ -803,7 +808,7 @@ async function apiCaptureScreenshot(
 }
 
 async function apiListProjects(): Promise<string[]> {
-  const res = await fetch("/api/projects");
+  const res = await apiFetch("/api/projects");
   const json = (await res.json()) as unknown;
   if (!res.ok) {
     const err = (json as { error?: string }).error ?? `Projects error (${res.status})`;
@@ -1366,6 +1371,115 @@ export function App() {
     [updatePage]
   );
 
+  const updatePageMetadata = useCallback(
+    (patch: Partial<Page["metadata"]>) => {
+      updatePage((prev) =>
+        PageSchema.parse({
+          ...prev,
+          metadata: { ...prev.metadata, ...patch },
+        })
+      );
+    },
+    [updatePage]
+  );
+
+  const updateTheme = useCallback(
+    (recipe: (prevTheme: Page["theme"]) => Page["theme"]) => {
+      updatePage((prev) =>
+        PageSchema.parse({
+          ...prev,
+          theme: recipe(prev.theme),
+        })
+      );
+    },
+    [updatePage]
+  );
+
+  const startSectionRename = useCallback((sectionId: string, currentLabel: string) => {
+    setEditingSectionLabelId(sectionId);
+    setEditingSectionLabelValue(currentLabel);
+  }, []);
+
+  const commitSectionRename = useCallback(
+    (sectionId: string) => {
+      const next = sanitizeInlineText(editingSectionLabelValue);
+      setEditingSectionLabelId(null);
+      setEditingSectionLabelValue("");
+      if (!next) return;
+      updatePage((prev) =>
+        PageSchema.parse({
+          ...prev,
+          sections: prev.sections.map((section) => (section.id === sectionId ? { ...section, label: next } : section)),
+        })
+      );
+    },
+    [editingSectionLabelValue, updatePage]
+  );
+
+  const cancelSectionRename = useCallback(() => {
+    setEditingSectionLabelId(null);
+    setEditingSectionLabelValue("");
+  }, []);
+
+  const moveSelectedComponentToSection = useCallback(
+    (sectionId: string) => {
+      if (!canEdit) return;
+      const fromComponentId = selected?.componentId;
+      if (!fromComponentId) return;
+      updatePage((prev) => {
+        const fromSection = prev.sections.find((section) => section.components.some((component) => component.id === fromComponentId));
+        const toSection = prev.sections.find((section) => section.id === sectionId);
+        if (!fromSection || !toSection) return prev;
+        const nextSections = moveComponentByIndex({
+          sections: prev.sections,
+          fromSectionId: fromSection.id,
+          fromComponentId,
+          toSectionId: sectionId,
+          toIndex: toSection.components.length,
+        });
+        return PageSchema.parse({ ...prev, sections: nextSections });
+      });
+
+      setSelected({ sectionId, componentId: fromComponentId });
+    },
+    [canEdit, selected, updatePage]
+  );
+
+  const dropComponentIntoSection = useCallback(
+    (sectionId: string, componentId: string) => {
+      updatePage((prev) => {
+        const fromSection = prev.sections.find((section) => section.components.some((component) => component.id === componentId));
+        const toSection = prev.sections.find((section) => section.id === sectionId);
+        if (!fromSection || !toSection) return prev;
+        const nextSections = moveComponentByIndex({
+          sections: prev.sections,
+          fromSectionId: fromSection.id,
+          fromComponentId: componentId,
+          toSectionId: sectionId,
+          toIndex: toSection.components.length,
+        });
+        return PageSchema.parse({ ...prev, sections: nextSections });
+      });
+
+      setSelected((prevSel) =>
+        prevSel?.componentId === componentId ? { sectionId, componentId } : prevSel
+      );
+    },
+    [updatePage]
+  );
+
+  const reorderSectionByDrop = useCallback(
+    (fromSectionId: string, toSectionId: string) => {
+      if (fromSectionId === toSectionId) return;
+      updatePage((prev) => {
+        const fromIndex = prev.sections.findIndex((section) => section.id === fromSectionId);
+        const toIndex = prev.sections.findIndex((section) => section.id === toSectionId);
+        return PageSchema.parse({ ...prev, sections: moveInArray(prev.sections, fromIndex, toIndex) });
+      });
+    },
+    [updatePage]
+  );
+
   const appendTranscript = useCallback((prev: string, next: string) => {
     const cleaned = next.replace(/\s+/g, " ").trim();
     if (!cleaned) return prev;
@@ -1653,7 +1767,7 @@ export function App() {
         </div>
         <div className="panelBody panelBodyPalette">
           <div className="paletteLayout">
-            <div className="paletteActivityBar" aria-label="Palette tabs">
+            <div className="paletteActivityBar" aria-label="Palette tabs" data-testid="palette-tabs">
               <button
                 type="button"
                 className={paletteTab === "project" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
@@ -1673,20 +1787,61 @@ export function App() {
               </button>
               <button
                 type="button"
-                className={paletteTab === "agent" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
-                data-testid="palette-tab-agent"
-                onClick={() => openPaletteTab("agent")}
-                title="Agent"
-                aria-label="Agent"
+                className={paletteTab === "page" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-page"
+                onClick={() => openPaletteTab("page")}
+                title="Page"
+                aria-label="Page"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path
-                    d="M8 9a4 4 0 0 1 8 0v1.5c0 .8.7 1.5 1.5 1.5H18a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V16a2 2 0 0 1 2-2h.5c.8 0 1.5-.7 1.5-1.5V9Z"
+                    d="M8 4h6l4 4v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
                     stroke="currentColor"
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
-                  <path d="M9.5 20v-1.5M14.5 20v-1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  <path d="M14 4v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                  <path d="M9 12h6M9 16h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={paletteTab === "theme" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-theme"
+                onClick={() => openPaletteTab("theme")}
+                title="Theme"
+                aria-label="Theme"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 4a8 8 0 1 0 8 8c0-.6-.5-1-1-1h-2.2a2 2 0 0 0-1.9 2.6l.2.6A2 2 0 0 1 13.2 17H12a5 5 0 0 1 0-10Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="9" cy="9" r="1" fill="currentColor" />
+                  <circle cx="14.5" cy="7.5" r="1" fill="currentColor" />
+                  <circle cx="16.5" cy="12.5" r="1" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={paletteTab === "sections" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-sections"
+                onClick={() => openPaletteTab("sections")}
+                title="Sections"
+                aria-label="Sections"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 5h12M6 12h12M6 19h12"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="4" cy="5" r="1.25" fill="currentColor" />
+                  <circle cx="4" cy="12" r="1.25" fill="currentColor" />
+                  <circle cx="4" cy="19" r="1.25" fill="currentColor" />
                 </svg>
               </button>
               <button
@@ -1726,19 +1881,31 @@ export function App() {
                   <path d="M9 10.2a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z" fill="currentColor" />
                 </svg>
               </button>
+              <button
+                type="button"
+                className={paletteTab === "agent" && !paletteCollapsed ? "paletteTabBtn paletteTabBtnActive" : "paletteTabBtn"}
+                data-testid="palette-tab-agent"
+                onClick={() => openPaletteTab("agent")}
+                title="Agent"
+                aria-label="Agent"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M8 9a4 4 0 0 1 8 0v1.5c0 .8.7 1.5 1.5 1.5H18a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V16a2 2 0 0 1 2-2h.5c.8 0 1.5-.7 1.5-1.5V9Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M9.5 20v-1.5M14.5 20v-1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
 
             {paletteCollapsed ? null : (
               <div className="paletteSidebar">
                 <div className="paletteSidebarHeader">
                   <div className="paletteSidebarTitle" data-testid="palette-active-title">
-                    {paletteTab === "project"
-                      ? "Project"
-                      : paletteTab === "agent"
-                        ? "Agent"
-                        : paletteTab === "add"
-                          ? "Add blocks"
-                          : "Images + Assets"}
+                    {PALETTE_TAB_TITLES[paletteTab]}
                   </div>
                 </div>
                 <div className="paletteSidebarBody">
@@ -1931,6 +2098,38 @@ export function App() {
                         )}
                       </div>
                     </div>
+                  ) : null}
+
+                  {paletteTab === "page" && page ? (
+                    <PageMetadataPanel page={page} canEdit={canEdit} onChangeMetadata={updatePageMetadata} />
+                  ) : null}
+
+                  {paletteTab === "theme" && page ? (
+                    <ThemePanel page={page} canEdit={canEdit} resolvedTheme={resolvedSiteTheme} onChangeTheme={updateTheme} />
+                  ) : null}
+
+                  {paletteTab === "sections" && page ? (
+                    <SectionsPanel
+                      page={page}
+                      canEdit={canEdit}
+                      selected={selected}
+                      editingSectionLabelId={editingSectionLabelId}
+                      editingSectionLabelValue={editingSectionLabelValue}
+                      dragOverSectionId={dragOverSectionId}
+                      dragOverComponentSectionId={dragOverComponentSectionId}
+                      onSelectSection={(sectionId) => setSelected({ sectionId })}
+                      onMoveSection={moveSection}
+                      onRemoveSection={removeSection}
+                      onRenameSectionStart={startSectionRename}
+                      onRenameSectionChange={setEditingSectionLabelValue}
+                      onRenameSectionCommit={commitSectionRename}
+                      onRenameSectionCancel={cancelSectionRename}
+                      onMoveSelectedComponentToSection={moveSelectedComponentToSection}
+                      onDropComponentIntoSection={dropComponentIntoSection}
+                      onReorderSectionByDrop={reorderSectionByDrop}
+                      onSetDragOverSectionId={setDragOverSectionId}
+                      onSetDragOverComponentSectionId={setDragOverComponentSectionId}
+                    />
                   ) : null}
 
                   {paletteTab === "agent" ? (
@@ -2479,574 +2678,14 @@ export function App() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel" data-testid="inspector-panel">
         <div className="panelHeader">
-          <h2>Structure</h2>
+          <h2>Inspector</h2>
           <span className="badge">{selectedComponent ? selectedComponent.type : selectedSection ? "section" : "none"}</span>
         </div>
         <div className="panelBody">
           {page ? (
             <div className="stack">
-              <div className="card">
-                <div className="cardTitle">Page metadata</div>
-                <div className="stack">
-                  <div className="field">
-                    <label>Title</label>
-                    <input
-                      value={page.metadata.title}
-                      disabled={!canEdit}
-                      onChange={(e) =>
-                        updatePage((prev) =>
-                          PageSchema.parse({ ...prev, metadata: { ...prev.metadata, title: e.target.value } })
-                        )
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label>Description</label>
-                    <textarea
-                      rows={3}
-                      value={page.metadata.description}
-                      disabled={!canEdit}
-                      onChange={(e) =>
-                        updatePage((prev) =>
-                          PageSchema.parse({ ...prev, metadata: { ...prev.metadata, description: e.target.value } })
-                        )
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="cardTitle">Theme</div>
-                <div className="stack">
-                  <div className="field">
-                    <label>Preset</label>
-                    <select
-                      data-testid="theme-preset"
-                      value={page.theme.preset ?? ""}
-                      disabled={!canEdit}
-                      onChange={(e) => {
-                        const nextPreset = e.target.value ? (e.target.value as (typeof THEME_PRESETS)[number]) : null;
-                        updatePage((prev) =>
-                          PageSchema.parse({
-                            ...prev,
-                            theme: {
-                              preset: nextPreset,
-                              fontFamily: null,
-                              baseFontSize: null,
-                              lineHeight: null,
-                              bgColor: null,
-                              textColor: null,
-                              mutedTextColor: null,
-                              accentColor: null,
-                              spaceBase: null,
-                              radius: null,
-                            },
-                          })
-                        );
-                      }}
-                    >
-                      <option value="">(default)</option>
-                      {THEME_PRESETS.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-                    <div className="field" style={{ width: 160 }}>
-                      <label>Background</label>
-                      <input
-                        type="color"
-                        data-testid="theme-bg"
-                        value={page.theme.bgColor ?? resolvedSiteTheme.bgColor}
-                        disabled={!canEdit}
-                        onChange={(e) =>
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: e.target.value } })
-                          )
-                        }
-                      />
-                      <button
-                        className="btn"
-                        onClick={() => updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, bgColor: null } }))}
-                        disabled={!canEdit || page.theme.bgColor === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 160 }}>
-                      <label>Text</label>
-                      <input
-                        type="color"
-                        value={page.theme.textColor ?? resolvedSiteTheme.textColor}
-                        disabled={!canEdit}
-                        onChange={(e) =>
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: e.target.value } })
-                          )
-                        }
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, textColor: null } }))
-                        }
-                        disabled={!canEdit || page.theme.textColor === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 160 }}>
-                      <label>Muted</label>
-                      <input
-                        type="color"
-                        value={page.theme.mutedTextColor ?? resolvedSiteTheme.mutedTextColor}
-                        disabled={!canEdit}
-                        onChange={(e) =>
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: e.target.value } })
-                          )
-                        }
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, mutedTextColor: null } })
-                          )
-                        }
-                        disabled={!canEdit || page.theme.mutedTextColor === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 160 }}>
-                      <label>Accent</label>
-                      <input
-                        type="color"
-                        data-testid="theme-accent"
-                        value={page.theme.accentColor ?? resolvedSiteTheme.accentColor}
-                        disabled={!canEdit}
-                        onChange={(e) =>
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: e.target.value } })
-                          )
-                        }
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, accentColor: null } }))
-                        }
-                        disabled={!canEdit || page.theme.accentColor === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-                    <div className="field" style={{ width: 220 }}>
-                      <label>Font family (CSS)</label>
-                      <input
-                        value={page.theme.fontFamily ?? ""}
-                        placeholder="(auto)"
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          updatePage((prev) =>
-                            PageSchema.parse({ ...prev, theme: { ...prev.theme, fontFamily: raw ? raw : null } })
-                          );
-                        }}
-                      />
-                    </div>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Base size</label>
-                      <input
-                        inputMode="numeric"
-                        data-testid="theme-base-font"
-                        value={String(page.theme.baseFontSize ?? resolvedSiteTheme.baseFontSize)}
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          const n = raw ? Number(raw) : NaN;
-                          const clamped = Number.isFinite(n) ? Math.max(12, Math.min(22, Math.round(n))) : null;
-                          updatePage((prev) =>
-                            PageSchema.parse({
-                              ...prev,
-                              theme: { ...prev.theme, baseFontSize: clamped },
-                            })
-                          );
-                        }}
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, baseFontSize: null } }))
-                        }
-                        disabled={!canEdit || page.theme.baseFontSize === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Line height</label>
-                      <input
-                        value={String(page.theme.lineHeight ?? resolvedSiteTheme.lineHeight)}
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          const n = raw ? Number(raw) : NaN;
-                          const clamped = Number.isFinite(n) ? Math.max(1.1, Math.min(1.8, n)) : null;
-                          updatePage((prev) =>
-                            PageSchema.parse({
-                              ...prev,
-                              theme: { ...prev.theme, lineHeight: clamped },
-                            })
-                          );
-                        }}
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, lineHeight: null } }))
-                        }
-                        disabled={!canEdit || page.theme.lineHeight === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Spacing</label>
-                      <input
-                        inputMode="numeric"
-                        value={String(page.theme.spaceBase ?? resolvedSiteTheme.spaceBase)}
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          const n = raw ? Number(raw) : NaN;
-                          const clamped = Number.isFinite(n) ? Math.max(4, Math.min(14, Math.round(n))) : null;
-                          updatePage((prev) =>
-                            PageSchema.parse({
-                              ...prev,
-                              theme: { ...prev.theme, spaceBase: clamped },
-                            })
-                          );
-                        }}
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, spaceBase: null } }))
-                        }
-                        disabled={!canEdit || page.theme.spaceBase === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                    <div className="field" style={{ width: 140 }}>
-                      <label>Radius</label>
-                      <input
-                        inputMode="numeric"
-                        value={String(page.theme.radius ?? resolvedSiteTheme.radius)}
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          const n = raw ? Number(raw) : NaN;
-                          const clamped = Number.isFinite(n) ? Math.max(0, Math.min(28, Math.round(n))) : null;
-                          updatePage((prev) =>
-                            PageSchema.parse({
-                              ...prev,
-                              theme: { ...prev.theme, radius: clamped },
-                            })
-                          );
-                        }}
-                      />
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          updatePage((prev) => PageSchema.parse({ ...prev, theme: { ...prev.theme, radius: null } }))
-                        }
-                        disabled={!canEdit || page.theme.radius === null}
-                      >
-                        Auto
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="list">
-                {page.sections.map((section, idx) => (
-                  <div
-                    key={section.id}
-                    className="card"
-                    data-testid="structure-section-card"
-                    data-section-id={section.id}
-                    onDragOverCapture={(e) => {
-                      if (!canEdit) return;
-                      const payload = getDragPayload(e);
-                      if (!payload) return;
-                      if (payload.kind === "section") {
-                        e.preventDefault();
-                        setDragOverSectionId(section.id);
-                      }
-                    }}
-                    onDragLeave={(e) => {
-                      const related = e.relatedTarget;
-                      if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
-                      setDragOverSectionId((prev) => (prev === section.id ? null : prev));
-                    }}
-                    onDropCapture={(e) => {
-                      if (!canEdit) return;
-                      const payload = getDragPayload(e);
-                      if (!payload || payload.kind !== "section") return;
-                      e.preventDefault();
-                      clearDragPayload();
-                      setDragOverSectionId(null);
-
-                      if (payload.sectionId === section.id) return;
-                      updatePage((prev) => {
-                        const fromIndex = prev.sections.findIndex((s) => s.id === payload.sectionId);
-                        const toIndex = prev.sections.findIndex((s) => s.id === section.id);
-                        return PageSchema.parse({ ...prev, sections: moveInArray(prev.sections, fromIndex, toIndex) });
-                      });
-                    }}
-                    style={
-                      dragOverSectionId === section.id
-                        ? { outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2 }
-                        : undefined
-                    }
-                  >
-                    <div className="row" style={{ justifyContent: "space-between" }}>
-                      <div className="row" style={{ gap: 10 }}>
-                        {canEdit ? (
-                          <span
-                            className="dragHandle"
-                            data-testid="structure-section-drag-handle"
-                            draggable={canEdit && editingSectionLabelId !== section.id}
-                            title="Drag to reorder section"
-                            onDragStart={(e) => {
-                              if (!canEdit) return;
-                              if (editingSectionLabelId === section.id) return;
-                              setDragPayload(e, { kind: "section", sectionId: section.id });
-                            }}
-                            onDragEnd={() => setTimeout(() => clearDragPayload(), 0)}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            ⋮⋮
-                          </span>
-                        ) : null}
-                        {editingSectionLabelId === section.id && canEdit ? (
-                          <input
-                            data-testid="section-label-input"
-                            value={editingSectionLabelValue}
-                            onChange={(e) => setEditingSectionLabelValue(e.target.value)}
-                            autoFocus
-                            style={{ width: 220 }}
-                            onBlur={() => {
-                              const next = sanitizeInlineText(editingSectionLabelValue);
-                              setEditingSectionLabelId(null);
-                              setEditingSectionLabelValue("");
-                              if (!next) return;
-                              updatePage((prev) =>
-                                PageSchema.parse({
-                                  ...prev,
-                                  sections: prev.sections.map((s) => (s.id === section.id ? { ...s, label: next } : s)),
-                                })
-                              );
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                setEditingSectionLabelId(null);
-                                setEditingSectionLabelValue("");
-                                return;
-                              }
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                (e.currentTarget as HTMLInputElement).blur();
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div
-                            className="cardTitle"
-                            data-testid="section-label"
-                            onDoubleClick={() => {
-                              if (!canEdit) return;
-                              setEditingSectionLabelId(section.id);
-                              setEditingSectionLabelValue(section.label);
-                            }}
-                            title={canEdit ? "Double-click to rename" : undefined}
-                          >
-                            {section.label}
-                          </div>
-                        )}
-                        {!section.settings.visible ? <span className="badge">hidden</span> : null}
-                      </div>
-                      <div className="row">
-                        <button className="btn" onClick={() => moveSection(section.id, -1)} disabled={!canEdit || idx === 0}>
-                          ↑
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={() => moveSection(section.id, 1)}
-                          disabled={!canEdit || idx === page.sections.length - 1}
-                        >
-                          ↓
-                        </button>
-                        {selected?.componentId ? (
-                          <button
-                            className="btn"
-                            onClick={() => {
-                              if (!canEdit) return;
-                              const fromComponentId = selected?.componentId;
-                              if (!fromComponentId) return;
-                              updatePage((prev) => {
-                                const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === fromComponentId));
-                                const toSection = prev.sections.find((s) => s.id === section.id);
-                                if (!fromSection || !toSection) return prev;
-                                const actualFromSectionId = fromSection.id;
-                                const nextSections = moveComponentByIndex({
-                                  sections: prev.sections,
-                                  fromSectionId: actualFromSectionId,
-                                  fromComponentId,
-                                  toSectionId: section.id,
-                                  toIndex: toSection.components.length,
-                                });
-                                return PageSchema.parse({ ...prev, sections: nextSections });
-                              });
-
-                              setSelected({ sectionId: section.id, componentId: fromComponentId });
-                            }}
-                            disabled={!canEdit}
-                            title="Move selected component to this section"
-                          >
-                            Move here
-                          </button>
-                        ) : null}
-                        <button className="btn btnDanger" onClick={() => removeSection(section.id)} disabled={!canEdit}>
-                          Remove
-                        </button>
-                        <button className="btn" onClick={() => setSelected({ sectionId: section.id })}>
-                          Select
-                        </button>
-                      </div>
-                    </div>
-                    <div className="muted">{section.components.length} components</div>
-                    <div
-                      className="structureComponentDropZone"
-                      data-testid="structure-component-dropzone"
-                      data-section-id={section.id}
-                      style={
-                        dragOverComponentSectionId === section.id
-                          ? { borderColor: "rgba(37, 99, 235, 0.6)", background: "rgba(37, 99, 235, 0.08)" }
-                          : undefined
-                      }
-                      onDragOverCapture={(e) => {
-                        if (!canEdit) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        setDragOverComponentSectionId(section.id);
-                      }}
-                      onDragEnterCapture={(e) => {
-                        if (!canEdit) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        setDragOverComponentSectionId(section.id);
-                      }}
-                      onDragOver={(e) => {
-                        if (!canEdit) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        setDragOverComponentSectionId(section.id);
-                      }}
-                      onDragEnter={(e) => {
-                        if (!canEdit) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        setDragOverComponentSectionId(section.id);
-                      }}
-                      onDragLeave={(e) => {
-                        const related = e.relatedTarget;
-                        if (related && related instanceof Node && (e.currentTarget as HTMLElement).contains(related)) return;
-                        setDragOverComponentSectionId((prev) => (prev === section.id ? null : prev));
-                      }}
-                      onDropCapture={(e) => {
-                        if (!canEdit) return;
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        clearDragPayload();
-                        setDragOverComponentSectionId(null);
-                        updatePage((prev) => {
-                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
-                          const toSection = prev.sections.find((s) => s.id === section.id);
-                          if (!fromSection || !toSection) return prev;
-                          const actualFromSectionId = fromSection.id;
-                          const nextSections = moveComponentByIndex({
-                            sections: prev.sections,
-                            fromSectionId: actualFromSectionId,
-                            fromComponentId: payload.componentId,
-                            toSectionId: section.id,
-                            toIndex: toSection.components.length,
-                          });
-                          return PageSchema.parse({ ...prev, sections: nextSections });
-                        });
-
-                        setSelected((prevSel) =>
-                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
-                        );
-                      }}
-                      onDrop={(e) => {
-                        if (!canEdit) return;
-                        const payload = getDragPayload(e);
-                        if (!payload || payload.kind !== "component") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        clearDragPayload();
-                        setDragOverComponentSectionId(null);
-                        updatePage((prev) => {
-                          const fromSection = prev.sections.find((s) => s.components.some((c) => c.id === payload.componentId));
-                          const toSection = prev.sections.find((s) => s.id === section.id);
-                          if (!fromSection || !toSection) return prev;
-                          const actualFromSectionId = fromSection.id;
-                          const nextSections = moveComponentByIndex({
-                            sections: prev.sections,
-                            fromSectionId: actualFromSectionId,
-                            fromComponentId: payload.componentId,
-                            toSectionId: section.id,
-                            toIndex: toSection.components.length,
-                          });
-                          return PageSchema.parse({ ...prev, sections: nextSections });
-                        });
-
-                        setSelected((prevSel) =>
-                          prevSel?.componentId === payload.componentId ? { sectionId: section.id, componentId: payload.componentId } : prevSel
-                        );
-                      }}
-                    >
-                      Drop component here
-                    </div>
-                  </div>
-                ))}
-              </div>
-
               {selectedSection ? (
                 <Inspector
                   section={selectedSection}
@@ -3065,7 +2704,7 @@ export function App() {
                   }
                 />
               ) : (
-                <div className="muted">Select a section to edit its components.</div>
+                <div className="muted">Select a section or component to inspect it.</div>
               )}
             </div>
           ) : (
