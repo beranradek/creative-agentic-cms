@@ -7,3 +7,5 @@ This includes:
 Move them to left "Palette", with icon/tab for each of them.
 
 On the right sidebar, leave only Inspector for currently selected section/component.
+
+If already implemented, review the work.
