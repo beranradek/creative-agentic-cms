@@ -1103,6 +1103,39 @@ test("exported section inline radius follows theme preset", async ({ page }) => 
   expect(html).toContain("border-radius:var(--site-radius);");
 });
 
+test("exported section radius follows explicit theme override", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_theme_radius_override_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await expect(page.getByTestId("theme-radius")).toBeVisible();
+  await page.getByTestId("theme-radius").fill("6");
+
+  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await page.getByTestId("section-bg").fill("#ff0000");
+  await page.getByTestId("section-padding").evaluate((el, value) => {
+    const input = el as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) throw new Error("Missing HTMLInputElement.value setter");
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, "24");
+
+  await saveAndWait(page);
+  await page.getByTestId("export-site").click();
+  await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
+
+  const cssRes = await page.request.get(`/projects/${projectId}/output/styles.css`);
+  expect(cssRes.ok()).toBeTruthy();
+  const css = await cssRes.text();
+  expect(css).toContain("--site-radius:6px;");
+});
+
 test("exported HTML includes section + image styles", async ({ page }) => {
   await page.goto("/");
 

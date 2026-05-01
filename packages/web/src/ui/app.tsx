@@ -3467,6 +3467,7 @@ export function App() {
                       <label>Radius</label>
                       <input
                         inputMode="numeric"
+                        data-testid="theme-radius"
                         value={String(page.theme.radius ?? resolvedSiteTheme.radius)}
                         disabled={!canEdit}
                         onChange={(e) => {
