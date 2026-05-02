@@ -1126,6 +1126,12 @@ test("exported section radius follows explicit theme override", async ({ page })
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "24");
 
+  const previewSectionRadius = await page
+    .getByTestId("preview-section")
+    .first()
+    .evaluate((el) => getComputedStyle(el).borderTopLeftRadius);
+  expect(previewSectionRadius).toBe("6px");
+
   await saveAndWait(page);
   await page.getByTestId("export-site").click();
   await expect(page.getByTestId("export-output-dir")).toHaveText(`projects/${projectId}/output`);
