@@ -1,0 +1,1 @@
+In Palette - Project - Projects - create project selection component for selection from many projects, reacting also to keyboard inputs for searching among many website projects.

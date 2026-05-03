@@ -16,6 +16,9 @@ const EnvSchema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://127.0.0.1:5173"),
   SERVE_WEB: BoolFromEnvSchema.default(false),
   WEB_DIST_DIR: z.string().default("./packages/web/dist"),
+  API_SESSION_TOKEN: z.string().min(1).optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  IMAGEGEN_MODEL: z.string().default("gpt-image-1"),
 });
 
 export type ServerConfig = z.infer<typeof EnvSchema>;

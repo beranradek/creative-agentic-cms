@@ -174,10 +174,14 @@ body {
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   border-right: 1px solid var(--line);
   background: rgba(248, 250, 252, 0.9);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  min-height: 0;
 }
 
 .paletteTabBtn {
@@ -788,4 +792,42 @@ body {
 
 .contactForm button {
   justify-self: start;
+}
+
+.generateDialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.generateDialogCard {
+  background: var(--color-surface, #1e293b);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: var(--color-accent, #6366f1);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }

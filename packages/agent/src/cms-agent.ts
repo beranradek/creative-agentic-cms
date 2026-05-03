@@ -16,9 +16,9 @@ const AgentInputSchema = z.object({
 export type AgentInput = z.infer<typeof AgentInputSchema>;
 
 const ScreenshotRequestOptionsSchema = z.object({
-  width: z.number().int().positive().max(4096).optional(),
-  height: z.number().int().positive().max(4096).optional(),
-  fullPage: z.boolean().optional(),
+  width: z.number().int().positive().max(4096).nullable(),
+  height: z.number().int().positive().max(4096).nullable(),
+  fullPage: z.boolean().nullable(),
 });
 
 const AgentOutputSchema = z.discriminatedUnion("kind", [
@@ -30,10 +30,14 @@ const AgentOutputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("request_screenshot"),
     assistantMessage: z.string().min(1),
-    reason: z.string().min(1).optional(),
-    options: ScreenshotRequestOptionsSchema.optional(),
+    reason: z.string().min(1).nullable().optional(),
+    options: ScreenshotRequestOptionsSchema.nullable().optional(),
   }),
 ]);
+
+const AgentOutputEnvelopeSchema = z.object({
+  result: AgentOutputSchema,
+});
 
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
@@ -46,8 +50,20 @@ You edit a single page represented as JSON.
 
 Rules:
 - Output MUST match the provided JSON schema (structured output).
-- If the screenshot is not available and the user request depends on visual details (layout, spacing, colors, alignment),
-  output kind="request_screenshot" instead of guessing. Keep assistantMessage short and actionable.
+- The output envelope is { "result": { ... } }, where result is one of exactly two shapes
+  distinguished by the "kind" discriminator:
+  1. kind="edit" — for any change to the page. Required fields: kind, assistantMessage, page.
+     Do NOT use any other discriminator value (e.g. "success", "ok", "update" are INVALID).
+  2. kind="request_screenshot" — when you need a visual to proceed. Required fields:
+     kind, assistantMessage. Optional: reason, options.
+- Default to kind="edit". Only use kind="request_screenshot" if the screenshot is not
+  available and the user request depends on visual details (layout, spacing, colors, alignment).
+  Keep assistantMessage short and actionable.
+- For kind="edit", the returned page object MUST:
+  - keep page.version exactly as provided in the input (do NOT increment it),
+  - include the full page.assets array (copy it from the input verbatim unless the user
+    explicitly asks you to add/remove/edit an asset),
+  - include page.metadata, page.theme, and page.sections.
 - Preserve existing ids whenever you edit existing content.
 - When creating new ids, use deterministic prefixes:
   - sec_<uuid> for sections
@@ -221,7 +237,7 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
     throw new Error("OPENAI_API_KEY is not set. Copy .env.example to .env and set your key.");
   }
   const temperature = Number(process.env.TEMPERATURE ?? "0");
-  const maxTokens = Number(process.env.MAX_TOKENS ?? "1200");
+  const maxTokens = Number(process.env.MAX_TOKENS ?? "4000");
 
   const nowMs = Date.now();
   circuitBreaker.canRequest(nowMs);
@@ -230,9 +246,12 @@ export async function runCmsAgent(input: AgentInput): Promise<AgentOutput> {
     const model = new ChatOpenAI({
       model: modelName,
       temperature: Number.isFinite(temperature) ? temperature : 0,
-      maxTokens: Number.isFinite(maxTokens) ? maxTokens : 1200,
+      maxTokens: Number.isFinite(maxTokens) ? maxTokens : 4000,
       apiKey: process.env.OPENAI_API_KEY,
-    }).withStructuredOutput(AgentOutputSchema, { name: "cms_edit_page" });
+    }).withStructuredOutput(AgentOutputEnvelopeSchema, {
+      name: "cms_edit_page",
+      method: "functionCalling",
+    });
 
     const screenshotAvailable = Boolean(parsed.screenshotUrl && parsed.screenshotPngBase64);
     const userText = `Project: ${parsed.projectId}
@@ -267,9 +286,9 @@ ${parsed.userMessage}`;
       new HumanMessage({ content: humanContent }),
     ]);
 
-    const output = AgentOutputSchema.parse(response);
+    const envelope = AgentOutputEnvelopeSchema.parse(response);
     circuitBreaker.onSuccess();
-    return output;
+    return envelope.result;
   } catch (error) {
     circuitBreaker.onFailure(nowMs);
     throw error;

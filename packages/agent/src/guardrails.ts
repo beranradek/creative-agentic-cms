@@ -1,4 +1,4 @@
-import { type Page } from "@cac/shared";
+import { type Page, type Section, type Component, type Asset } from "@cac/shared";
 import { summarizePageDiff, type PageDiffSummary } from "./diff.js";
 
 export type AgentEditPolicy = {
@@ -183,6 +183,76 @@ export function assertDiffWithinBudget(summary: PageDiffSummary, budget: DiffBud
       `Agent change too large: JSON delta (${summary.approxJsonDeltaChars}) exceeds budget (${budget.maxApproxJsonDeltaChars}).`
     );
   }
+}
+
+function collectComponentIds(sections: readonly Section[]): Set<string> {
+  const ids = new Set<string>();
+  for (const section of sections) for (const component of section.components) ids.add(component.id);
+  return ids;
+}
+
+export function reconcilePageEdit(prev: Page, next: Page, userMessage: string): Page {
+  const policy = getAgentEditPolicy(userMessage);
+
+  let sections: Section[] = next.sections.map((section) => ({ ...section, components: [...section.components] }));
+  const assets: Asset[] = [...next.assets];
+
+  if (!policy.allowDelete) {
+    const presentSectionIds = new Set(sections.map((s) => s.id));
+    const presentComponentIds = collectComponentIds(sections);
+
+    const sectionsById = new Map(sections.map((s) => [s.id, s] as const));
+    for (const prevSection of prev.sections) {
+      const keptSection = sectionsById.get(prevSection.id);
+      if (!keptSection) continue;
+      for (const prevComponent of prevSection.components) {
+        if (presentComponentIds.has(prevComponent.id)) continue;
+        keptSection.components.push(prevComponent as Component);
+        presentComponentIds.add(prevComponent.id);
+      }
+    }
+
+    for (const prevSection of prev.sections) {
+      if (presentSectionIds.has(prevSection.id)) continue;
+      const restoredComponents = prevSection.components.filter((c) => !presentComponentIds.has(c.id));
+      const restoredSection: Section = { ...prevSection, components: [...restoredComponents] };
+      sections.push(restoredSection);
+      presentSectionIds.add(prevSection.id);
+      for (const c of restoredComponents) presentComponentIds.add(c.id);
+    }
+
+    const presentAssetIds = new Set(assets.map((a) => a.id));
+    for (const prevAsset of prev.assets) {
+      if (presentAssetIds.has(prevAsset.id)) continue;
+      assets.push(prevAsset);
+      presentAssetIds.add(prevAsset.id);
+    }
+  }
+
+  if (!policy.allowReorder) {
+    const sectionsById = new Map(sections.map((s) => [s.id, s] as const));
+    const orderedExisting = prev.sections
+      .map((s) => sectionsById.get(s.id))
+      .filter((s): s is Section => s !== undefined);
+    const prevSectionIdSet = new Set(prev.sections.map((s) => s.id));
+    const newSections = sections.filter((s) => !prevSectionIdSet.has(s.id));
+    sections = [...orderedExisting, ...newSections];
+
+    const prevSectionsById = new Map(prev.sections.map((s) => [s.id, s] as const));
+    sections = sections.map((section) => {
+      const prevSection = prevSectionsById.get(section.id);
+      if (!prevSection) return section;
+      const compsById = new Map(section.components.map((c) => [c.id, c] as const));
+      const orderedExistingComps = prevSection.components
+        .map((c) => compsById.get(c.id))
+        .filter((c): c is Component => c !== undefined);
+      const prevCompIdSet = new Set(prevSection.components.map((c) => c.id));
+      const newComps = section.components.filter((c) => !prevCompIdSet.has(c.id));
+      return { ...section, components: [...orderedExistingComps, ...newComps] };
+    });
+  }
+
+  return { ...next, sections, assets };
 }
 
 export function validateAgentEdit(

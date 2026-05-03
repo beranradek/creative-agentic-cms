@@ -2,7 +2,14 @@ import path from "node:path";
 import { mkdir, readFile } from "node:fs/promises";
 import express from "express";
 import { z, type ZodType } from "zod";
-import { CircuitBreakerOpenError, runCmsAgent, summarizePageDiff, validateAgentEdit, type DiffBudget } from "@cac/agent";
+import {
+  CircuitBreakerOpenError,
+  reconcilePageEdit,
+  runCmsAgent,
+  summarizePageDiff,
+  validateAgentEdit,
+  type DiffBudget,
+} from "@cac/agent";
 import { PageSchema } from "@cac/shared";
 import { createDefaultPage } from "../default-page.js";
 import type { ProjectStore } from "../project-store.js";
@@ -172,7 +179,8 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
         return;
       }
 
-      const nextPage = PageSchema.parse(output.page);
+      const parsedNext = PageSchema.parse(output.page);
+      const nextPage = reconcilePageEdit(page, parsedNext, body.message);
       if (body.mode === "apply") {
         const budget: DiffBudget = {
           maxSectionAdds: 1,

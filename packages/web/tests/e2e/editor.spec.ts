@@ -8,11 +8,23 @@ const PNG_2X2_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwHwyBNBAw/AcAR8oI+ItOQ4UAAAAASUVORK5CYII=";
 
 async function fetchPageJson(page: import("@playwright/test").Page, projectId: string) {
-  return await page.evaluate(async (pid) => {
-    const res = await fetch(`/api/projects/${encodeURIComponent(pid)}/page`);
-    const json = (await res.json()) as { page?: unknown };
-    return json.page;
-  }, projectId);
+  const token = await page.evaluate(async () => {
+    const res = await fetch("/api/session");
+    const json = (await res.json()) as { token?: string; error?: string };
+    if (!res.ok || !json.token) throw new Error(json.error ?? `Session error (${res.status})`);
+    return json.token;
+  });
+
+  return await page.evaluate(async ({ pid, token: sessionToken }) => {
+    const res = await fetch(`/api/projects/${encodeURIComponent(pid)}/page`, {
+      headers: { authorization: `Bearer ${sessionToken}` },
+    });
+    const json = (await res.json().catch(() => null)) as { page?: unknown; error?: string } | null;
+    if (!res.ok) {
+      throw new Error(json?.error ?? `Failed to fetch page.json (${res.status})`);
+    }
+    return json?.page;
+  }, { pid: projectId, token });
 }
 
 async function loadProject(page: import("@playwright/test").Page, projectId: string) {
@@ -25,16 +37,22 @@ async function loadProject(page: import("@playwright/test").Page, projectId: str
 
 async function ensurePaletteTab(
   page: import("@playwright/test").Page,
-  tab: "project" | "agent" | "add" | "images"
+  tab: "project" | "page" | "theme" | "sections" | "agent" | "add" | "images"
 ) {
   const titleByTab: Record<typeof tab, string> = {
     project: "Project",
+    page: "Page",
+    theme: "Theme",
+    sections: "Sections",
     agent: "Agent",
     add: "Add blocks",
     images: "Images + Assets",
   };
   const testIdByTab: Record<typeof tab, string> = {
     project: "palette-tab-project",
+    page: "palette-tab-page",
+    theme: "palette-tab-theme",
+    sections: "palette-tab-sections",
     agent: "palette-tab-agent",
     add: "palette-tab-add",
     images: "palette-tab-images",
@@ -62,6 +80,83 @@ async function saveAndReload(page: import("@playwright/test").Page) {
   await page.getByTestId("reload-page").click();
   await expect(page.getByTestId("load-state")).toHaveText("ready");
 }
+
+test("project page API requires auth and invalid ids are sanitized", async ({ page }) => {
+  await page.goto("/");
+
+  const unauthenticated = await page.request.get("/api/projects/demo/page");
+  expect(unauthenticated.status()).toBe(401);
+  await expect(unauthenticated.json()).resolves.toEqual({ error: "Unauthorized." });
+
+  const invalidProjectId = await page.request.get("/api/projects/..%2F..%2FREADME/page");
+  expect(invalidProjectId.status()).toBe(400);
+  const invalidBody = (await invalidProjectId.json()) as { error?: string; stack?: string };
+  expect(invalidBody.error).toBe("Invalid projectId.");
+  expect(JSON.stringify(invalidBody)).not.toContain("ZodError");
+  expect(JSON.stringify(invalidBody)).not.toContain("stack");
+});
+
+test("editor retries with a fresh session after a stale-token 401", async ({ page }) => {
+  const projectId = `e2e_session_retry_${Date.now()}`;
+
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    let projectRequestCount = 0;
+    let sessionRequestCount = 0;
+    let injectedUnauthorizedCount = 0;
+
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+      if (url.includes("/api/session")) {
+        sessionRequestCount += 1;
+      }
+      if (url.includes("/api/projects/") && url.includes("/page")) {
+        projectRequestCount += 1;
+        if (projectRequestCount === 1) {
+          injectedUnauthorizedCount += 1;
+          return new Response(JSON.stringify({ error: "Unauthorized." }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      return originalFetch(input, init);
+    };
+
+    (window as Window & {
+      __CAC_TEST_SESSION_RETRY__?: {
+        getCounts: () => {
+          projectRequestCount: number;
+          sessionRequestCount: number;
+          injectedUnauthorizedCount: number;
+        };
+      };
+    }).__CAC_TEST_SESSION_RETRY__ = {
+      getCounts: () => ({ projectRequestCount, sessionRequestCount, injectedUnauthorizedCount }),
+    };
+  });
+
+  await page.goto("/");
+  await loadProject(page, projectId);
+
+  const counts = await page.evaluate(() => {
+    const testState = (window as Window & {
+      __CAC_TEST_SESSION_RETRY__?: {
+        getCounts: () => {
+          projectRequestCount: number;
+          sessionRequestCount: number;
+          injectedUnauthorizedCount: number;
+        };
+      };
+    }).__CAC_TEST_SESSION_RETRY__;
+    if (!testState) throw new Error("Missing session retry test state");
+    return testState.getCounts();
+  });
+
+  expect(counts.projectRequestCount).toBeGreaterThanOrEqual(2);
+  expect(counts.sessionRequestCount).toBeGreaterThanOrEqual(2);
+  expect(counts.injectedUnauthorizedCount).toBe(1);
+});
 
 test("editor can add content, upload image, save and reload", async ({ page }) => {
   await page.goto("/");
@@ -164,7 +259,74 @@ test("keyboard shortcuts undo/redo work (and don't hijack contenteditable)", asy
   await expect(page.getByTestId("preview-item")).toHaveCount(1);
 });
 
-test("sections can be reordered via drag and drop (Structure panel)", async ({ page }) => {
+test("page editors moved into palette tabs and inspector stays selection-only", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_palette_refactor_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "page");
+  const metadataCard = page.getByTestId("page-metadata-panel");
+  await expect(metadataCard.locator("label").filter({ hasText: "Title" })).toBeVisible();
+  await expect(metadataCard.locator("label").filter({ hasText: "Description" })).toBeVisible();
+
+  await metadataCard.locator("input").fill("Palette metadata title");
+  await metadataCard.locator("textarea").fill("Metadata now lives in the left palette.");
+
+  await ensurePaletteTab(page, "theme");
+  await expect(page.getByTestId("theme-panel")).toBeVisible();
+  await expect(page.getByTestId("theme-preset")).toBeVisible();
+  await expect(page.getByTestId("theme-accent")).toBeVisible();
+
+  await ensurePaletteTab(page, "sections");
+  await expect(page.getByTestId("sections-section-card")).toHaveCount(0);
+  await expect(page.getByTestId("palette-tab-project")).toBeVisible();
+  await expect(page.getByTestId("palette-tab-page")).toBeVisible();
+  await expect(page.getByTestId("palette-tab-theme")).toBeVisible();
+  await expect(page.getByTestId("palette-tab-sections")).toBeVisible();
+
+  const inspectorPanel = page.getByTestId("inspector-panel");
+  await expect(inspectorPanel.getByRole("heading", { name: "Inspector" })).toBeVisible();
+  await expect(inspectorPanel).toContainText("Select a section or component to inspect it.");
+  await expect(inspectorPanel).not.toContainText("Page metadata");
+  await expect(inspectorPanel).not.toContainText("Theme");
+  await expect(inspectorPanel).not.toContainText("Remove");
+
+  await ensurePaletteTab(page, "project");
+  await page.getByTestId("save-page").click();
+  await page.getByTestId("reload-page").click();
+
+  await ensurePaletteTab(page, "page");
+  await expect(metadataCard.locator("input")).toHaveValue("Palette metadata title");
+  await expect(metadataCard.locator("textarea")).toHaveValue("Metadata now lives in the left palette.");
+});
+
+test("palette tab order and small-viewport scrolling remain usable", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_palette_tabs_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  const tabIds = await page.getByTestId("palette-tabs").locator("button").evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("data-testid"))
+  );
+  expect(tabIds).toEqual([
+    "palette-tab-project",
+    "palette-tab-page",
+    "palette-tab-theme",
+    "palette-tab-sections",
+    "palette-tab-add",
+    "palette-tab-images",
+    "palette-tab-agent",
+  ]);
+
+  await page.setViewportSize({ width: 1280, height: 320 });
+  await page.getByTestId("palette-tab-agent").scrollIntoViewIfNeeded();
+  await page.getByTestId("palette-tab-agent").click();
+  await expect(page.getByTestId("palette-active-title")).toHaveText("Agent");
+});
+
+test("sections can be reordered via drag and drop (Sections tab)", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_reorder_${Date.now()}`;
@@ -174,11 +336,12 @@ test("sections can be reordered via drag and drop (Structure panel)", async ({ p
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
 
   // Swap order: drag first section handle onto second.
-  const handles = page.getByTestId("structure-section-drag-handle");
+  const handles = page.getByTestId("sections-section-drag-handle");
   await expect(handles).toHaveCount(2);
   await handles.nth(0).dragTo(cards.nth(1));
 
@@ -341,12 +504,15 @@ test("components can be moved across sections via drag and drop in Preview", asy
   const text = page.locator('[data-testid="preview-item"][data-component-type="rich_text"]');
   await hero.dragTo(text);
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 
   await saveAndReload(page);
+  await saveAndReload(page);
+  await ensurePaletteTab(page, "sections");
   await expect(cards.nth(0)).toContainText("0 components");
   await expect(cards.nth(1)).toContainText("2 components");
 });
@@ -374,7 +540,7 @@ test("selection follows component when moved across sections in Preview", async 
   await expect(page.locator(".previewItemSelected")).toHaveAttribute("data-component-type", "hero");
 });
 
-test("components can be moved across sections via Structure list drop", async ({ page }) => {
+test("components can be moved across sections via Sections list drop", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_structure_cross_section_${Date.now()}`;
@@ -384,7 +550,8 @@ test("components can be moved across sections via Structure list drop", async ({
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
 
   const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
@@ -404,7 +571,8 @@ test("components can be reordered via drag and drop within a section (Inspector 
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-text").click();
 
-  const sectionCard = page.getByTestId("structure-section-card").first();
+  await ensurePaletteTab(page, "sections");
+  const sectionCard = page.getByTestId("sections-section-card").first();
   await sectionCard.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: "+ Form" }).click();
 
@@ -625,7 +793,8 @@ test("section style (background + padding) persists", async ({ page }) => {
 
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
 
   await page.getByTestId("section-bg").fill("#ff0000");
   await page.getByTestId("section-padding").evaluate((el, value) => {
@@ -661,7 +830,8 @@ test("section visibility hides in Preview and export", async ({ page }) => {
   await page.getByTestId("add-hero").click();
   await page.getByTestId("add-text").click();
 
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByTestId("section-visible").uncheck();
 
   await expect(page.locator("text=Design. Compose. Publish.")).toHaveCount(0);
@@ -682,7 +852,7 @@ test("section visibility hides in Preview and export", async ({ page }) => {
   expect(html).toContain("Write something compelling.");
 });
 
-test("section label can be renamed from Structure and persists", async ({ page }) => {
+test("section label can be renamed from Sections and persists", async ({ page }) => {
   await page.goto("/");
 
   const projectId = `e2e_section_label_${Date.now()}`;
@@ -691,15 +861,17 @@ test("section label can be renamed from Structure and persists", async ({ page }
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
-  const sectionCard = page.getByTestId("structure-section-card").first();
+  await ensurePaletteTab(page, "sections");
+  const sectionCard = page.getByTestId("sections-section-card").first();
   await sectionCard.getByTestId("section-label").dblclick();
-  await page.getByTestId("section-label-input").fill("Above the fold");
+  await page.getByTestId("section-label-input").fill("<Above>   the   fold");
   await page.getByTestId("section-label-input").press("Enter");
   await expect(sectionCard).toContainText("Above the fold");
 
   await saveAndReload(page);
 
-  await expect(page.getByTestId("structure-section-card").first()).toContainText("Above the fold");
+  await ensurePaletteTab(page, "sections");
+  await expect(page.getByTestId("sections-section-card").first()).toContainText("Above the fold");
 });
 
 test("preview drag-and-drop uses before/after drop position", async ({ page }) => {
@@ -711,7 +883,8 @@ test("preview drag-and-drop uses before/after drop position", async ({ page }) =
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-text").click();
 
-  const sectionCard = page.getByTestId("structure-section-card").first();
+  await ensurePaletteTab(page, "sections");
+  const sectionCard = page.getByTestId("sections-section-card").first();
   await sectionCard.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: "+ Form" }).click();
 
@@ -849,12 +1022,22 @@ test("rich text formatting toolbar can bold selection and persists", async ({ pa
   // Blur + persist.
   await saveAndReload(page);
 
-  const pageJson = (await fetchPageJson(page, projectId)) as {
-    sections: Array<{ components: Array<{ type: string; html?: string }> }>;
-  };
-  const html = pageJson.sections[0]?.components[0]?.html ?? "";
-  expect(html).toContain("<strong>");
-  expect(html).toContain("world");
+  await expect
+    .poll(async () => {
+      const currentPage = (await fetchPageJson(page, projectId)) as {
+        sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+      };
+      return currentPage.sections[0]?.components[0]?.html ?? "";
+    })
+    .toContain("<strong>");
+  await expect
+    .poll(async () => {
+      const currentPage = (await fetchPageJson(page, projectId)) as {
+        sections: Array<{ components: Array<{ type: string; html?: string }> }>;
+      };
+      return currentPage.sections[0]?.components[0]?.html ?? "";
+    })
+    .toContain("world");
 });
 
 test("image can be replaced from Preview toolbar (uploads new asset)", async ({ page }) => {
@@ -1103,6 +1286,7 @@ test("page theme affects Preview and export CSS vars", async ({ page }) => {
   await page.getByTestId("add-hero").click();
 
   // Change accent color and verify Preview reflects it.
+  await ensurePaletteTab(page, "theme");
   await page.getByTestId("theme-accent").fill("#ff0000");
   const cta = page.locator(".cta").first();
   const bg = await cta.evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -1218,7 +1402,8 @@ test("exported HTML includes section + image styles", async ({ page }) => {
     buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
   });
 
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByTestId("section-bg").fill("#ff0000");
   await page.getByTestId("section-padding").evaluate((el, value) => {
     const input = el as HTMLInputElement;
@@ -1273,7 +1458,8 @@ test("exported HTML includes component box styles", async ({ page }) => {
   await page.getByTestId("add-text").click();
 
   // Add a form into the first section so we have hero + rich_text + contact_form.
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: "+ Form" }).click();
 
   const heroItem = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
@@ -1329,7 +1515,8 @@ test("exported HTML includes gradients and button styles", async ({ page }) => {
   await page.getByTestId("add-hero").click();
 
   // Add a form into the first section so we have contact_form button styling too.
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: "+ Form" }).click();
 
   // Section gradient background
