@@ -225,6 +225,35 @@ test("sections can be reordered via drag and drop in Preview", async ({ page }) 
   expect(types[1]).toBe("hero");
 });
 
+test("section auto padding matches server default in React preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_auto_padding_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await page.getByTestId("preview-section-handle").first().click();
+  await expect(page.getByTestId("section-padding")).toBeVisible();
+
+  const paddingRow = page.getByTestId("section-padding").locator("..");
+  await paddingRow.getByRole("button", { name: "Auto" }).click();
+
+  const expectedPadding = await page.evaluate(() => {
+    const root = document.querySelector(".sitePreviewRoot");
+    if (!root) throw new Error("Missing .sitePreviewRoot");
+    return getComputedStyle(root).getPropertyValue("--site-space-3").trim();
+  });
+
+  const section = page.getByTestId("preview-section").first();
+  const paddingTop = await section.evaluate((el) => getComputedStyle(el).paddingTop);
+  expect(paddingTop).toBe(expectedPadding);
+
+  const bg = await section.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg).toBe("rgba(255, 255, 255, 0.96)");
+});
+
 test("server-rendered preview can be opened (renderer parity spot-check)", async ({ page }) => {
   await page.goto("/");
 
