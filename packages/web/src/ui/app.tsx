@@ -3027,8 +3027,9 @@ export function App() {
                             data-testid="preview-section"
                             data-section-id={section.id}
                             style={{
-                              background: computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? undefined,
-                              padding: section.style.padding !== null ? section.style.padding : undefined,
+                              background:
+                                computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? "rgba(255,255,255,0.96)",
+                              padding: section.style.padding !== null ? section.style.padding : "var(--site-space-3)",
                               maxWidth: section.style.maxWidth ?? 980,
                             }}
                           >
