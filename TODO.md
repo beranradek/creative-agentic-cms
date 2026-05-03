@@ -27,10 +27,10 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 2 — Drag & Drop (full, intuitive)
 
-- [ ] Sections:
+- [x] Sections:
   - [x] Reorder via ↑/↓ and drag&drop in Structure.
   - [x] Drag sections directly in Preview (optional).
-- [ ] Components:
+- [x] Components:
   - [x] Reorder within a section (Inspector + Preview).
   - [x] Move components across sections (Preview drop zones).
   - [x] Move components across sections via Structure list (optional).
@@ -62,7 +62,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Edit alt text (stored in `page.json`).
   - [x] Replace an existing image asset file (keep same `asset.id`).
   - [x] Set image focal point (x/y) for cropping & cover.
-- [ ] Image editor (MVP):
+- [x] Image editor (MVP):
   - [x] Modal editor with zoom/pan/crop presets + output resize.
   - [x] Non-destructive workflow (save as new asset + optional replace usages).
   - [x] “Update image in preview” UX (select image → Edit/Replace buttons).
@@ -85,20 +85,20 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 6 — Agent (smart + safe + delightful)
 
-- [ ] Context:
+- [x] Context:
   - [x] Page snapshot text.
   - [x] Screenshot pipeline + pass image to agent (vision).
   - [x] Add markup snapshot (rendered HTML excerpt) + diff summary.
-- [ ] Controls:
+- [x] Controls:
   - [x] Mic STT input for prompt (browser SpeechRecognition).
   - [x] “Suggest” mode (draft plan + changes summary) vs “Apply” mode.
   - [x] Step-by-step edits (agent proposes patches, user approves each).
-- [ ] Reliability:
+- [x] Reliability:
   - [x] Guard: no implicit deletions.
   - [x] Guard: block unexpected reorder/add/moves unless explicitly requested.
   - [x] Guard: limit change magnitude unless user asks (diff budget).
   - [x] Prompt templates per component type.
-- [ ] Tools:
+- [x] Tools:
   - [x] Agent can request a refreshed screenshot.
   - [x] Agent can add SVG placeholder images (auto-materialized on apply).
 
@@ -114,7 +114,7 @@ It is organized by milestones and designed to be executed incrementally with con
 ## Milestone 8 — Testing & Automation
 
 - [x] Playwright: core E2E flows.
-- [ ] Add E2E coverage for:
+- [x] Add E2E coverage for:
   - [x] cross-section DnD move
   - [x] image replace
   - [x] image edit (styles + editor)
