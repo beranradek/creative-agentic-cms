@@ -110,7 +110,7 @@ export function createImagegenRouter(options: CreateImagegenRouterOptions): expr
       const dims = imageSize(img.buffer);
       width = dims.width ?? null;
       height = dims.height ?? null;
-    } catch (_e) {
+    } catch {
       width = null;
       height = null;
     }

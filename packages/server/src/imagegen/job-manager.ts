@@ -1,4 +1,4 @@
-import type { ImageGenJob, JobStatus, TempImage } from "./types.js";
+import type { ImageGenJob, TempImage } from "./types.js";
 
 const JOB_RETENTION_MS = 5 * 60 * 1000;
 const TEMP_IMAGE_TTL_MS = 20 * 60 * 1000;

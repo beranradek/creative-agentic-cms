@@ -195,7 +195,7 @@ export function reconcilePageEdit(prev: Page, next: Page, userMessage: string): 
   const policy = getAgentEditPolicy(userMessage);
 
   let sections: Section[] = next.sections.map((section) => ({ ...section, components: [...section.components] }));
-  let assets: Asset[] = [...next.assets];
+  const assets: Asset[] = [...next.assets];
 
   if (!policy.allowDelete) {
     const presentSectionIds = new Set(sections.map((s) => s.id));

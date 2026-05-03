@@ -17,7 +17,7 @@ import {
   type Page,
   type Section,
 } from "@cac/shared";
-import { clearDragPayload, getDragPayload, setDragPayload } from "./editor-dnd.js";
+import { buildPartialAgentProposalPage, computeAgentProposalSteps } from "../agent/proposal-steps.js";
 import { PageMetadataPanel, SectionsPanel, ThemePanel } from "./palette-panels.js";
 import { isSttSupported, startStt, stopStt } from "./stt.js";
 import { useToast } from "./toast.js";
@@ -180,6 +180,13 @@ function createComponent(type: Component["type"]): Component {
       style: { blockAlign: null, textAlign: null, maxWidth: null, padding: null, backgroundColor: null, backgroundGradient: null },
     };
   }
+  if (type === "divider") {
+    return {
+      id: createId("cmp"),
+      type: "divider",
+      style: { thickness: null, color: null, maxWidth: null, marginY: null, opacity: null },
+    };
+  }
   if (type === "image") {
     throw new Error("Use createImageComponent(assetId) for image components.");
   }
@@ -338,6 +345,61 @@ function sanitizeInlineText(text: string): string {
 
 type DropPosition = "before" | "after";
 
+type DragPayload =
+  | { kind: "section"; sectionId: string }
+  | { kind: "component"; sectionId: string; componentId: string };
+
+let inMemoryDragPayload: DragPayload | null = null;
+let inMemoryDragPayloadToken = 0;
+
+function setDragPayload(e: React.DragEvent, payload: DragPayload) {
+  inMemoryDragPayloadToken += 1;
+  inMemoryDragPayload = payload;
+  e.dataTransfer.effectAllowed = "move";
+  const raw = JSON.stringify(payload);
+  // Some browsers / automation harnesses only preserve `text/plain` during HTML5 DnD.
+  e.dataTransfer.setData("application/x-cac", raw);
+  e.dataTransfer.setData("text/plain", raw);
+}
+
+function clearDragPayload() {
+  inMemoryDragPayload = null;
+}
+
+function scheduleClearDragPayload(delayMs: number) {
+  const token = inMemoryDragPayloadToken;
+  setTimeout(() => {
+    if (token !== inMemoryDragPayloadToken) return;
+    clearDragPayload();
+  }, delayMs);
+}
+
+function getDragPayload(e: React.DragEvent): DragPayload | null {
+  const candidates = [e.dataTransfer.getData("application/x-cac"), e.dataTransfer.getData("text/plain")].filter(
+    (v) => v && v.trim().length
+  );
+  for (const raw of candidates) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") continue;
+      const kind = (parsed as { kind?: unknown }).kind;
+      if (kind === "section") {
+        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
+        if (typeof sectionId === "string" && sectionId.length) return { kind: "section", sectionId };
+      }
+      if (kind === "component") {
+        const sectionId = (parsed as { sectionId?: unknown }).sectionId;
+        const componentId = (parsed as { componentId?: unknown }).componentId;
+        if (typeof sectionId === "string" && sectionId.length && typeof componentId === "string" && componentId.length) {
+          return { kind: "component", sectionId, componentId };
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return inMemoryDragPayload;
+}
 function computeDropPosition(rect: DOMRect, clientY: number): DropPosition {
   const mid = rect.top + rect.height / 2;
   return clientY >= mid ? "after" : "before";
@@ -414,6 +476,49 @@ function moveComponentByIndex(args: {
       const next = s.components.slice();
       const clamped = Math.max(0, Math.min(next.length, toIndex));
       next.splice(clamped, 0, moving);
+      return { ...s, components: next };
+    }
+    return s;
+  });
+}
+
+function moveComponentsByIndex(args: {
+  sections: Section[];
+  fromSectionId: string;
+  fromComponentIds: string[];
+  toSectionId: string;
+  toIndex: number; // 0..len (append allowed)
+}): Section[] {
+  const { sections, fromSectionId, fromComponentIds, toSectionId, toIndex } = args;
+  const fromSection = sections.find((s) => s.id === fromSectionId);
+  const toSection = sections.find((s) => s.id === toSectionId);
+  if (!fromSection || !toSection) return sections;
+
+  const ids = Array.from(new Set(fromComponentIds));
+  if (!ids.length) return sections;
+  const idSet = new Set(ids);
+
+  const moving = fromSection.components.filter((c) => idSet.has(c.id));
+  if (!moving.length) return sections;
+
+  if (fromSectionId === toSectionId) {
+    const remaining = fromSection.components.filter((c) => !idSet.has(c.id));
+    const removedBefore = fromSection.components.reduce((acc, c, idx) => (idSet.has(c.id) && idx < toIndex ? acc + 1 : acc), 0);
+    const adjustedIndex = toIndex - removedBefore;
+    const clamped = Math.max(0, Math.min(remaining.length, adjustedIndex));
+    const nextComponents = remaining.slice();
+    nextComponents.splice(clamped, 0, ...moving);
+    return sections.map((s) => (s.id === fromSectionId ? { ...s, components: nextComponents } : s));
+  }
+
+  return sections.map((s) => {
+    if (s.id === fromSectionId) {
+      return { ...s, components: s.components.filter((c) => !idSet.has(c.id)) };
+    }
+    if (s.id === toSectionId) {
+      const next = s.components.slice();
+      const clamped = Math.max(0, Math.min(next.length, toIndex));
+      next.splice(clamped, 0, ...moving);
       return { ...s, components: next };
     }
     return s;
@@ -523,6 +628,44 @@ async function apiPutPage(
     throw new Error(`Failed to save page (${res.status})`);
   }
   return getEtagHeader(res);
+}
+
+const ExportConfigSchema = z.object({
+  baseUrl: z.string().url().nullable().default(null),
+  includeSitemap: z.boolean().default(true),
+  includeRobotsTxt: z.boolean().default(true),
+  allowIndexing: z.boolean().default(true),
+  analyticsHtml: z.string().max(20_000).nullable().default(null),
+  contactForm: z
+    .object({
+      mode: z.enum(["disabled", "formspree", "netlify", "custom"]).default("disabled"),
+      actionUrl: z.string().url().nullable().default(null),
+      netlifyFormName: z.string().min(1).nullable().default(null),
+      successRedirectUrl: z.string().url().nullable().default(null),
+    })
+    .default({}),
+});
+
+type ExportConfig = z.infer<typeof ExportConfigSchema>;
+
+async function apiGetExportConfig(projectId: string): Promise<ExportConfig> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`);
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) throw new Error(`Failed to load export config (${res.status})`);
+  const config = (json as { config?: unknown }).config;
+  return ExportConfigSchema.parse(config);
+}
+
+async function apiPutExportConfig(projectId: string, config: ExportConfig): Promise<ExportConfig> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  const json = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) throw new Error(`Failed to save export config (${res.status})`);
+  const next = (json as { config?: unknown }).config;
+  return ExportConfigSchema.parse(next);
 }
 
 const DiffSummarySchema = z.object({
@@ -660,6 +803,20 @@ async function apiUploadImage(projectId: string, file: File, alt?: string) {
   const json = (await res.json()) as unknown;
   const asset = (json as { asset?: unknown }).asset;
   return AssetSchema.parse(asset);
+}
+
+async function apiCreatePlaceholderImage(
+  projectId: string,
+  input: { text: string; width?: number; height?: number; alt?: string }
+): Promise<Asset> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images/placeholder`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`Failed to create placeholder (${res.status})`);
+  const json = (await res.json()) as unknown;
+  return AssetSchema.parse((json as { asset?: unknown }).asset);
 }
 
 async function apiReplaceImageAsset(
@@ -846,6 +1003,7 @@ export function App() {
   const [editingSectionLabelId, setEditingSectionLabelId] = useState<string | null>(null);
   const [editingSectionLabelValue, setEditingSectionLabelValue] = useState("");
   const [selected, setSelected] = useState<{ sectionId: string; componentId?: string } | null>(null);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ serverPage: Page; serverEtag: string | null } | null>(null);
@@ -860,7 +1018,13 @@ export function App() {
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [optimizeUploads, setOptimizeUploads] = useState(true);
   const [maxUploadPx, setMaxUploadPx] = useState(1600);
+  const [placeholderText, setPlaceholderText] = useState("Placeholder");
+  const [placeholderPreset, setPlaceholderPreset] = useState<"hero" | "square" | "landscape" | "portrait">("landscape");
+  const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
+  const [previewRenderer, setPreviewRenderer] = useState<"react" | "server_saved" | "server_draft">("react");
+  const [serverDraftHtml, setServerDraftHtml] = useState<string | null>(null);
+  const [isRenderingServerDraft, setIsRenderingServerDraft] = useState(false);
   const [agentText, setAgentText] = useState("");
   const sttSupported = useMemo(() => isSttSupported(), []);
   const [sttLang, setSttLang] = useState(() => {
@@ -883,8 +1047,17 @@ export function App() {
   const [agentProposalBaseJson, setAgentProposalBaseJson] = useState<string | null>(null);
   const [agentProposalMessage, setAgentProposalMessage] = useState<string | null>(null);
   const [agentProposalBaseEtag, setAgentProposalBaseEtag] = useState<string | null>(null);
+  const [agentProposalStepSelection, setAgentProposalStepSelection] = useState<Record<string, boolean>>({});
   const [agentDiffSummary, setAgentDiffSummary] = useState<DiffSummary | null>(null);
   const [exportInfo, setExportInfo] = useState<string | null>(null);
+  const [exportConfig, setExportConfig] = useState<ExportConfig | null>(null);
+  const [exportConfigError, setExportConfigError] = useState<string | null>(null);
+  const [exportBaseUrlInput, setExportBaseUrlInput] = useState("");
+  const [exportAnalyticsHtmlInput, setExportAnalyticsHtmlInput] = useState("");
+  const [exportContactActionUrlInput, setExportContactActionUrlInput] = useState("");
+  const [exportContactNetlifyNameInput, setExportContactNetlifyNameInput] = useState("");
+  const [exportContactSuccessRedirectInput, setExportContactSuccessRedirectInput] = useState("");
+  const [isSavingExportConfig, setIsSavingExportConfig] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
@@ -907,6 +1080,39 @@ export function App() {
   const canUndo = canEdit && state.kind === "ready" && state.editor.past.length > 0;
   const canRedo = canEdit && state.kind === "ready" && state.editor.future.length > 0;
 
+  const agentProposalSteps = useMemo(() => {
+    if (!agentProposal || !agentProposalBasePage) return [];
+    return computeAgentProposalSteps(agentProposalBasePage, agentProposal);
+  }, [agentProposal, agentProposalBasePage]);
+
+  useEffect(() => {
+    if (!agentProposalSteps.length) {
+      setAgentProposalStepSelection({});
+      return;
+    }
+    setAgentProposalStepSelection((prev) => {
+      const next: Record<string, boolean> = {};
+      const hasNonReorderSteps = agentProposalSteps.some((s) => s.id !== "sections:reorder");
+      for (const step of agentProposalSteps) {
+        const prevValue = prev[step.id];
+        if (typeof prevValue === "boolean") {
+          next[step.id] = prevValue;
+          continue;
+        }
+        if (step.id === "sections:reorder" && hasNonReorderSteps) {
+          next[step.id] = false;
+          continue;
+        }
+        if (step.id.startsWith("section:remove:")) {
+          next[step.id] = false;
+          continue;
+        }
+        next[step.id] = true;
+      }
+      return next;
+    });
+  }, [agentProposalSteps]);
+
   const imageAssets = useMemo(() => {
     if (!page) return [];
     return page.assets.filter((a) => a.type === "image");
@@ -921,6 +1127,48 @@ export function App() {
     if (!selectedSection || !selected?.componentId) return null;
     return selectedSection.components.find((c) => c.id === selected.componentId) ?? null;
   }, [selectedSection, selected]);
+
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setSelectedComponentIds([]);
+  }, []);
+
+  const selectSectionOnly = useCallback((sectionId: string) => {
+    setSelected({ sectionId });
+    setSelectedComponentIds([]);
+  }, []);
+
+  const selectComponentSingle = useCallback((sectionId: string, componentId: string) => {
+    setSelected({ sectionId, componentId });
+    setSelectedComponentIds([componentId]);
+  }, []);
+
+  useEffect(() => {
+    if (!page || !selected) {
+      setSelectedComponentIds((prev) => (prev.length ? [] : prev));
+      return;
+    }
+
+    const section = page.sections.find((s) => s.id === selected.sectionId) ?? null;
+    if (!section) {
+      clearSelection();
+      return;
+    }
+
+    const existing = new Set(section.components.map((c) => c.id));
+    setSelectedComponentIds((prev) => {
+      const next = prev.filter((id) => existing.has(id));
+      if (selected.componentId && existing.has(selected.componentId) && !next.includes(selected.componentId)) {
+        next.push(selected.componentId);
+      }
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
+      return next;
+    });
+
+    if (selected.componentId && !existing.has(selected.componentId)) {
+      setSelected({ sectionId: selected.sectionId });
+    }
+  }, [clearSelection, page, selected]);
 
   const refreshProjects = useCallback(async () => {
     setIsProjectsLoading(true);
@@ -941,6 +1189,8 @@ export function App() {
     const effectiveProjectId = projectIdOverride ?? projectId;
     if (projectIdOverride && projectIdOverride !== projectId) setProjectId(projectIdOverride);
     setState({ kind: "loading" });
+    setExportConfig(null);
+    setExportConfigError(null);
     try {
       const next = await apiGetPage(effectiveProjectId);
       pageEtagRef.current = next.etag;
@@ -951,7 +1201,7 @@ export function App() {
       setAutosaveError(null);
       setSaveError(null);
       setLoadedProjectId(effectiveProjectId);
-      setSelected(null);
+      clearSelection();
       setAgentReply(null);
       setAgentError(null);
       setAgentProposal(null);
@@ -960,13 +1210,26 @@ export function App() {
       setAgentProposalMessage(null);
       setAgentProposalBaseEtag(null);
       setAgentDiffSummary(null);
+      void (async () => {
+        try {
+          const cfg = await apiGetExportConfig(effectiveProjectId);
+          setExportConfig(cfg);
+          setExportConfigError(null);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setExportConfig(ExportConfigSchema.parse({}));
+          setExportConfigError(message);
+        }
+      })();
       void refreshProjects();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setState({ kind: "error", message });
+      setExportConfig(null);
+      setExportConfigError(message);
       toast.error("Failed to load project", message);
     }
-  }, [pageEtagRef, projectId, refreshProjects, toast]);
+  }, [clearSelection, pageEtagRef, projectId, refreshProjects, toast]);
 
   useEffect(() => {
     void load();
@@ -991,6 +1254,15 @@ export function App() {
     latestPageRef.current = page;
     latestPageJsonRef.current = pageJson;
   }, [page, pageJson]);
+
+  useEffect(() => {
+    if (!exportConfig) return;
+    setExportBaseUrlInput(exportConfig.baseUrl ?? "");
+    setExportAnalyticsHtmlInput(exportConfig.analyticsHtml ?? "");
+    setExportContactActionUrlInput(exportConfig.contactForm.actionUrl ?? "");
+    setExportContactNetlifyNameInput(exportConfig.contactForm.netlifyFormName ?? "");
+    setExportContactSuccessRedirectInput(exportConfig.contactForm.successRedirectUrl ?? "");
+  }, [exportConfig]);
 
   const flushAutosaveTimer = useCallback(() => {
     autosaveTokenRef.current += 1;
@@ -1054,6 +1326,29 @@ export function App() {
     }
   }, [flushAutosaveTimer, page, persistPage, projectId, toast]);
 
+  const renderServerDraft = useCallback(
+    async (pageToRender: Page) => {
+      setIsRenderingServerDraft(true);
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/preview/render`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(pageToRender),
+        });
+        const html = await res.text();
+        if (!res.ok) throw new Error(html || `Server draft render failed (${res.status})`);
+        setServerDraftHtml(html);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        toast.error("Server draft preview failed", message);
+        setServerDraftHtml(null);
+      } finally {
+        setIsRenderingServerDraft(false);
+      }
+    },
+    [activeProjectId, toast]
+  );
+
   const reloadAfterConflict = useCallback(() => {
     if (!conflict) return;
     flushAutosaveTimer();
@@ -1063,10 +1358,10 @@ export function App() {
     setLastSavedAtMs(Date.now());
     setAutosaveError(null);
     setSaveError(null);
-    setSelected(null);
+    clearSelection();
     setConflict(null);
     toast.success("Reloaded latest from disk");
-  }, [conflict, flushAutosaveTimer, toast]);
+  }, [clearSelection, conflict, flushAutosaveTimer, toast]);
 
   const overwriteAfterConflict = useCallback(async () => {
     if (!page) return;
@@ -1167,8 +1462,8 @@ export function App() {
       const nextFuture = [page, ...future].slice(0, UNDO_LIMIT);
       return { kind: "ready", editor: { page: previous, past: nextPast, future: nextFuture } };
     });
-    setSelected(null);
-  }, []);
+    clearSelection();
+  }, [clearSelection]);
 
   const redo = useCallback(() => {
     setState((prev) => {
@@ -1180,8 +1475,8 @@ export function App() {
       const nextFuture = future.slice(1);
       return { kind: "ready", editor: { page: next, past: nextPast, future: nextFuture } };
     });
-    setSelected(null);
-  }, []);
+    clearSelection();
+  }, [clearSelection]);
 
   useEffect(() => {
     if (!canEdit || isSaving) return;
@@ -1315,7 +1610,42 @@ export function App() {
       });
       return next;
     });
-  }, [page, projectId, updatePage, optimizeUploads, maxUploadPx]);
+  }, [activeProjectId, maxUploadPx, optimizeUploads, page, updatePage]);
+
+  const createPlaceholder = useCallback(async () => {
+    if (!page) return;
+    if (!canEdit) return;
+    setIsCreatingPlaceholder(true);
+    try {
+      const preset: Record<typeof placeholderPreset, { width: number; height: number }> = {
+        hero: { width: 1200, height: 630 },
+        square: { width: 1024, height: 1024 },
+        landscape: { width: 1200, height: 800 },
+        portrait: { width: 900, height: 1200 },
+      };
+      const { width, height } = preset[placeholderPreset];
+      const asset = await apiCreatePlaceholderImage(activeProjectId, { text: placeholderText, width, height });
+      updatePage((prev) =>
+        PageSchema.parse({
+          ...prev,
+          assets: [...prev.assets, asset],
+          sections: [
+            ...prev.sections,
+            {
+              ...createSection("Image"),
+              components: [createImageComponent(asset.id)],
+            },
+          ],
+        })
+      );
+      toast.success("Placeholder created", asset.filename);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Placeholder failed", message);
+    } finally {
+      setIsCreatingPlaceholder(false);
+    }
+  }, [activeProjectId, canEdit, page, placeholderPreset, placeholderText, toast, updatePage]);
 
   const uploadImageAssetOnly = useCallback(
     async (file: File) => {
@@ -1354,32 +1684,15 @@ export function App() {
     [activeProjectId, flushAutosaveTimer, maxUploadPx, optimizeUploads, page, toast, updatePage]
   );
 
-  const replaceAssetIdUsagesInPage = useCallback(
-    (oldAssetId: string, newAssetId: string) => {
-      updatePage((prev) => {
-        const nextSections = prev.sections.map((s) => ({
-          ...s,
-          components: s.components.map((c) => {
-            if (c.type === "hero" && c.backgroundImageAssetId === oldAssetId) return { ...c, backgroundImageAssetId: newAssetId };
-            if (c.type === "image" && c.assetId === oldAssetId) return { ...c, assetId: newAssetId };
-            return c;
-          }),
-        }));
-        return PageSchema.parse({ ...prev, sections: nextSections });
-      });
-    },
-    [updatePage]
-  );
-
   const removeSection = useCallback(
     (sectionId: string) => {
       updatePage((prev) => {
         const next: Page = { ...prev, sections: prev.sections.filter((s) => s.id !== sectionId) };
         return PageSchema.parse(next);
       });
-      setSelected((prev) => (prev?.sectionId === sectionId ? null : prev));
+      if (selected?.sectionId === sectionId) clearSelection();
     },
-    [updatePage]
+    [clearSelection, selected, updatePage]
   );
 
   const updatePageMetadata = useCallback(
@@ -1636,7 +1949,7 @@ export function App() {
         lastSavedJsonRef.current = JSON.stringify(result.page);
         setLastSavedAtMs(Date.now());
         setAutosaveError(null);
-        setSelected(null);
+        clearSelection();
         toast.success("Agent applied changes");
       } else if (result.proposedPage) {
         setAgentProposalBaseEtag(result.pageEtag);
@@ -1644,6 +1957,7 @@ export function App() {
         setAgentProposalBasePage(page);
         setAgentProposalBaseJson(baseJson);
         setAgentProposalMessage(trimmed);
+        setAgentProposalStepSelection({});
         toast.success("Agent suggested changes", "Review and apply when ready.");
       } else {
         toast.error("Agent returned no proposal");
@@ -1661,7 +1975,7 @@ export function App() {
     } finally {
       setIsAgentRunning(false);
     }
-  }, [activeProjectId, agentRunMode, agentText, ensureSaved, isSttActive, page, stopAgentStt, toast, updatePage]);
+  }, [activeProjectId, agentRunMode, agentText, clearSelection, ensureSaved, isSttActive, page, stopAgentStt, toast, updatePage]);
 
   const applyAgentProposal = useCallback(async () => {
     if (!agentProposal) return;
@@ -1696,7 +2010,8 @@ export function App() {
       setAgentProposalBaseJson(null);
       setAgentProposalMessage(null);
       setAgentProposalBaseEtag(null);
-      setSelected(null);
+      setAgentProposalStepSelection({});
+      clearSelection();
       toast.success("Applied suggestion", `projects/${activeProjectId}/page.json`);
     } catch (error) {
       if (error instanceof ApiConflictError) {
@@ -1718,9 +2033,160 @@ export function App() {
     agentProposalBasePage,
     agentProposalBaseEtag,
     agentProposalMessage,
+    clearSelection,
     isSaving,
     toast,
     updatePage,
+  ]);
+
+  const applyAgentProposalSelectedSteps = useCallback(
+    async (mode: "selected" | "next") => {
+      if (!agentProposal) return;
+      if (isSaving) return;
+      if (!agentProposalBasePage || !agentProposalMessage || !agentProposalBaseJson) {
+        toast.error("Cannot apply suggestion", "Missing base state (rerun the agent).");
+        return;
+      }
+      if (latestPageJsonRef.current !== agentProposalBaseJson) {
+        toast.error("Cannot apply suggestion", "Page changed since suggestion (rerun the agent).");
+        return;
+      }
+
+      const selectedSteps = agentProposalSteps.filter((s) => agentProposalStepSelection[s.id] !== false);
+      if (!selectedSteps.length) {
+        toast.info("No steps selected");
+        return;
+      }
+
+      const stepsToApply = mode === "next" ? selectedSteps.slice(0, 1) : selectedSteps;
+      const stepIds = new Set<string>(stepsToApply.map((s) => s.id));
+      const partial = buildPartialAgentProposalPage(agentProposalBasePage, agentProposal, stepIds);
+      if (JSON.stringify(partial) === JSON.stringify(agentProposalBasePage)) {
+        toast.info("No changes to apply");
+        return;
+      }
+
+      setIsSaving(true);
+      setSaveError(null);
+      try {
+        const result = await apiApplyAgentProposal(
+          activeProjectId,
+          agentProposalMessage,
+          agentProposalBasePage,
+          partial,
+          agentProposalBaseEtag
+        );
+        pageEtagRef.current = result.pageEtag;
+        setConflict(null);
+        updatePage(() => result.page, { recordUndo: true });
+        lastSavedJsonRef.current = JSON.stringify(result.page);
+        setLastSavedAtMs(Date.now());
+        setAutosaveError(null);
+        setAgentDiffSummary(result.diffSummary);
+
+        const nextBaseJson = JSON.stringify(result.page);
+        setAgentProposalBasePage(result.page);
+        setAgentProposalBaseJson(nextBaseJson);
+        setAgentProposalBaseEtag(result.pageEtag);
+        clearSelection();
+
+        const remaining = computeAgentProposalSteps(result.page, agentProposal);
+        if (!remaining.length) {
+          setAgentProposal(null);
+          setAgentProposalBasePage(null);
+          setAgentProposalBaseJson(null);
+          setAgentProposalMessage(null);
+          setAgentProposalBaseEtag(null);
+          setAgentProposalStepSelection({});
+          toast.success("Applied suggestion", "All steps applied.");
+          return;
+        }
+
+        toast.success("Applied suggestion", mode === "next" ? stepsToApply[0]?.title ?? "Step" : "Selected steps");
+      } catch (error) {
+        if (error instanceof ApiConflictError) {
+          setConflict({ serverPage: error.serverPage, serverEtag: error.serverEtag });
+          setSaveError("Conflict: page changed on disk. Reload or overwrite.");
+          toast.error("Apply conflict", "Page changed on disk. Reload or overwrite.");
+        } else {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setSaveError(message);
+          toast.error("Apply failed", message);
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [
+      activeProjectId,
+      agentProposal,
+      agentProposalBaseJson,
+      agentProposalBasePage,
+      agentProposalBaseEtag,
+      agentProposalMessage,
+      agentProposalStepSelection,
+      agentProposalSteps,
+      clearSelection,
+      isSaving,
+      toast,
+      updatePage,
+    ]
+  );
+
+  const saveExportConfig = useCallback(async () => {
+    if (!exportConfig) return;
+    setIsSavingExportConfig(true);
+    setExportConfigError(null);
+    try {
+      const baseUrl = exportBaseUrlInput.trim() ? exportBaseUrlInput.trim() : null;
+      const analyticsHtml = exportAnalyticsHtmlInput.trim() ? exportAnalyticsHtmlInput.trim() : null;
+      const contactMode = exportConfig.contactForm.mode;
+      const actionUrlRaw = exportContactActionUrlInput.trim();
+      const netlifyNameRaw = exportContactNetlifyNameInput.trim();
+      const redirectRaw = exportContactSuccessRedirectInput.trim();
+
+      let contactForm: ExportConfig["contactForm"] = { ...exportConfig.contactForm };
+      if (contactMode === "disabled") {
+        contactForm = { mode: "disabled", actionUrl: null, netlifyFormName: null, successRedirectUrl: null };
+      } else if (contactMode === "netlify") {
+        contactForm = {
+          mode: "netlify",
+          actionUrl: null,
+          netlifyFormName: netlifyNameRaw || "contact",
+          successRedirectUrl: redirectRaw || null,
+        };
+      } else {
+        if (!actionUrlRaw) {
+          throw new Error("Contact form action URL is required for Formspree/Custom modes.");
+        }
+        contactForm = {
+          mode: contactMode,
+          actionUrl: actionUrlRaw,
+          netlifyFormName: null,
+          successRedirectUrl: null,
+        };
+      }
+
+      const next = ExportConfigSchema.parse({ ...exportConfig, baseUrl, analyticsHtml, contactForm });
+      const saved = await apiPutExportConfig(activeProjectId, next);
+      setExportConfig(saved);
+      toast.success("Saved export settings", `projects/${activeProjectId}/export.json`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setExportConfigError(message);
+      toast.error("Failed to save export settings", message);
+    } finally {
+      setIsSavingExportConfig(false);
+    }
+  }, [
+    activeProjectId,
+    exportAnalyticsHtmlInput,
+    exportBaseUrlInput,
+    exportConfig,
+    exportContactActionUrlInput,
+    exportContactNetlifyNameInput,
+    exportContactSuccessRedirectInput,
+    toast,
   ]);
 
   const exportProject = useCallback(async () => {
@@ -1999,7 +2465,7 @@ export function App() {
                           >
                             {isSaving ? "Saving..." : "Save page.json"}
                           </button>
-                          <button className="btn" data-testid="reload-page" onClick={() => void load()}>
+                          <button className="btn" data-testid="reload-page" onClick={() => void load()} disabled={isSaving}>
                             Reload
                           </button>
                         </div>
@@ -2037,11 +2503,15 @@ export function App() {
                             <span className="muted">Autosave</span>
                           </label>
                           {isAutosaving ? (
-                            <span className="badge">autosaving…</span>
+                            <span className="badge" data-testid="save-status">
+                              autosaving…
+                            </span>
                           ) : isDirty ? (
-                            <span className="badge">unsaved</span>
+                            <span className="badge" data-testid="save-status">
+                              unsaved
+                            </span>
                           ) : (
-                            <span className="badge" style={{ opacity: 0.8 }}>
+                            <span className="badge" data-testid="save-status" style={{ opacity: 0.8 }}>
                               saved
                             </span>
                           )}
@@ -2072,6 +2542,159 @@ export function App() {
                           >
                             {isCapturingScreenshot ? "Capturing..." : "Capture screenshot"}
                           </button>
+                        </div>
+                        <div className="card" style={{ marginTop: 10 }}>
+                          <div className="cardTitle">Export settings</div>
+                          {exportConfigError ? (
+                            <div className="errorBox" style={{ marginTop: 10 }}>
+                              <div className="errorBoxTitle">Export config error</div>
+                              <div>{exportConfigError}</div>
+                            </div>
+                          ) : null}
+                          {exportConfig ? (
+                            <div className="stack" style={{ gap: 10 }}>
+                              <div className="field">
+                                <label>Base URL</label>
+                                <input
+                                  data-testid="export-config-baseurl"
+                                  value={exportBaseUrlInput}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => setExportBaseUrlInput(e.target.value)}
+                                  placeholder="https://example.com"
+                                />
+                                <div className="muted">
+                                  Used for canonical + og:url in exported HTML, and for generating <code>sitemap.xml</code> / <code>robots.txt</code>.
+                                </div>
+                              </div>
+
+                              <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.includeRobotsTxt}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) =>
+                                      setExportConfig((prev) => (prev ? { ...prev, includeRobotsTxt: e.target.checked } : prev))
+                                    }
+                                  />
+                                  <span className="muted">robots.txt</span>
+                                </label>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.allowIndexing}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) => setExportConfig((prev) => (prev ? { ...prev, allowIndexing: e.target.checked } : prev))}
+                                  />
+                                  <span className="muted">Allow indexing</span>
+                                </label>
+                                <label className="row" style={{ gap: 8, alignItems: "center" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={exportConfig.includeSitemap}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) =>
+                                      setExportConfig((prev) => (prev ? { ...prev, includeSitemap: e.target.checked } : prev))
+                                    }
+                                  />
+                                  <span className="muted">sitemap.xml (requires Base URL)</span>
+                                </label>
+                              </div>
+
+                              <div className="field">
+                                <label>Analytics (raw HTML)</label>
+                                <textarea
+                                  rows={4}
+                                  data-testid="export-config-analytics"
+                                  value={exportAnalyticsHtmlInput}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => setExportAnalyticsHtmlInput(e.target.value)}
+                                  placeholder='Example: <script defer src="..."></script>'
+                                />
+                                <div className="muted">Injected into the exported HTML head.</div>
+                              </div>
+
+                              <div className="field">
+                                <label>Contact form submit</label>
+                                <select
+                                  data-testid="export-config-contact-mode"
+                                  value={exportConfig.contactForm.mode}
+                                  disabled={!canEdit || isSavingExportConfig || isSaving}
+                                  onChange={(e) => {
+                                    const mode =
+                                      e.target.value === "formspree"
+                                        ? "formspree"
+                                        : e.target.value === "netlify"
+                                          ? "netlify"
+                                          : e.target.value === "custom"
+                                            ? "custom"
+                                            : "disabled";
+                                    setExportConfig((prev) => (prev ? { ...prev, contactForm: { ...prev.contactForm, mode } } : prev));
+                                  }}
+                                >
+                                  <option value="disabled">disabled (no submit)</option>
+                                  <option value="netlify">Netlify Forms</option>
+                                  <option value="formspree">Formspree</option>
+                                  <option value="custom">Custom endpoint</option>
+                                </select>
+                                <div className="muted">
+                                  This affects the exported static site only (not the editor preview).
+                                </div>
+                              </div>
+
+                              {exportConfig.contactForm.mode === "netlify" ? (
+                                <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                                  <div className="field" style={{ minWidth: 240, flex: 1 }}>
+                                    <label>Netlify form name</label>
+                                    <input
+                                      data-testid="export-config-contact-netlify-name"
+                                      value={exportContactNetlifyNameInput}
+                                      disabled={!canEdit || isSavingExportConfig || isSaving}
+                                      onChange={(e) => setExportContactNetlifyNameInput(e.target.value)}
+                                      placeholder="contact"
+                                    />
+                                  </div>
+                                  <div className="field" style={{ minWidth: 320, flex: 2 }}>
+                                    <label>Success redirect (optional)</label>
+                                    <input
+                                      data-testid="export-config-contact-netlify-redirect"
+                                      value={exportContactSuccessRedirectInput}
+                                      disabled={!canEdit || isSavingExportConfig || isSaving}
+                                      onChange={(e) => setExportContactSuccessRedirectInput(e.target.value)}
+                                      placeholder="/thanks"
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {exportConfig.contactForm.mode === "formspree" || exportConfig.contactForm.mode === "custom" ? (
+                                <div className="field">
+                                  <label>Action URL</label>
+                                  <input
+                                    data-testid="export-config-contact-action"
+                                    value={exportContactActionUrlInput}
+                                    disabled={!canEdit || isSavingExportConfig || isSaving}
+                                    onChange={(e) => setExportContactActionUrlInput(e.target.value)}
+                                    placeholder="https://example.com/submit"
+                                  />
+                                </div>
+                              ) : null}
+
+                              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                                <button
+                                  className="btn"
+                                  data-testid="export-config-save"
+                                  disabled={!canEdit || isSavingExportConfig || isSaving || !exportConfig}
+                                  onClick={() => void saveExportConfig()}
+                                >
+                                  {isSavingExportConfig ? "Saving..." : "Save export settings"}
+                                </button>
+                                <div className="muted">Stored as <code>projects/&lt;id&gt;/export.json</code>.</div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="muted">Loading export settings…</div>
+                          )}
                         </div>
                         {exportError ? (
                           <div className="errorBox" style={{ marginTop: 10 }}>
@@ -2225,6 +2848,8 @@ export function App() {
                             setAgentProposalBasePage(null);
                             setAgentProposalBaseJson(null);
                             setAgentProposalMessage(null);
+                            setAgentProposalBaseEtag(null);
+                            setAgentProposalStepSelection({});
                             setAgentDiffSummary(null);
                           }}
                           disabled={!agentReply && !agentError && !agentProposal && !agentDiffSummary}
@@ -2239,17 +2864,53 @@ export function App() {
                           </button>
                           <button
                             className="btn"
+                            onClick={() => void applyAgentProposalSelectedSteps("selected")}
+                            disabled={isSaving || isAgentRunning || !agentProposalSteps.length}
+                            title="Apply only the selected steps below"
+                          >
+                            Apply selected
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => void applyAgentProposalSelectedSteps("next")}
+                            disabled={isSaving || isAgentRunning || !agentProposalSteps.length}
+                            title="Apply the next selected step"
+                          >
+                            Apply next
+                          </button>
+                          <button
+                            className="btn"
                             onClick={() => {
                               setAgentProposal(null);
                               setAgentProposalBasePage(null);
                               setAgentProposalBaseJson(null);
                               setAgentProposalMessage(null);
+                              setAgentProposalBaseEtag(null);
                               setAgentDiffSummary(null);
+                              setAgentProposalStepSelection({});
                             }}
                             disabled={isSaving || isAgentRunning}
                           >
                             Discard
                           </button>
+                        </div>
+                      ) : null}
+                      {agentProposal && agentProposalSteps.length ? (
+                        <div className="stack" style={{ marginTop: 10 }}>
+                          <div className="muted">Approve steps:</div>
+                          {agentProposalSteps.map((step) => (
+                            <label key={step.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={agentProposalStepSelection[step.id] !== false}
+                                onChange={(e) =>
+                                  setAgentProposalStepSelection((prev) => ({ ...prev, [step.id]: e.target.checked }))
+                                }
+                                disabled={isSaving || isAgentRunning}
+                              />
+                              <span className="muted">{step.title}</span>
+                            </label>
+                          ))}
                         </div>
                       ) : null}
                       {agentError ? (
@@ -2296,6 +2957,14 @@ export function App() {
                       </button>
                       <button
                         className="btn"
+                        data-testid="add-divider"
+                        onClick={() => addSectionWithComponent("divider", "Divider")}
+                        disabled={!canEdit}
+                      >
+                        Add Divider
+                      </button>
+                      <button
+                        className="btn"
                         data-testid="add-contact"
                         onClick={() => addSectionWithComponent("contact_form", "Contact")}
                         disabled={!canEdit}
@@ -2309,6 +2978,41 @@ export function App() {
                     <div className="stack">
                       <div className="card">
                         <div className="cardTitle">Images</div>
+                        <div className="field">
+                          <label>Placeholder</label>
+                          <div className="field">
+                            <label>Size</label>
+                            <select
+                              data-testid="placeholder-size"
+                              value={placeholderPreset}
+                              disabled={!canEdit || isCreatingPlaceholder}
+                              onChange={(e) => setPlaceholderPreset(e.target.value as typeof placeholderPreset)}
+                            >
+                              <option value="landscape">Landscape (1200×800)</option>
+                              <option value="hero">Hero (1200×630)</option>
+                              <option value="square">Square (1024×1024)</option>
+                              <option value="portrait">Portrait (900×1200)</option>
+                            </select>
+                          </div>
+                          <div className="row" style={{ gap: 10 }}>
+                            <input
+                              data-testid="placeholder-text"
+                              value={placeholderText}
+                              disabled={!canEdit || isCreatingPlaceholder}
+                              onChange={(e) => setPlaceholderText(e.target.value)}
+                              placeholder="e.g. Product screenshot"
+                              style={{ flex: 1 }}
+                            />
+                            <button
+                              className="btn"
+                              data-testid="placeholder-create"
+                              disabled={!canEdit || isCreatingPlaceholder || !placeholderText.trim()}
+                              onClick={() => void createPlaceholder()}
+                            >
+                              Create
+                            </button>
+                          </div>
+                        </div>
                         <div className="row" style={{ alignItems: "flex-end" }}>
                           <label className="row" style={{ gap: 8, alignItems: "center", flex: 1 }}>
                             <input type="checkbox" checked={optimizeUploads} onChange={(e) => setOptimizeUploads(e.target.checked)} />
@@ -2409,6 +3113,7 @@ export function App() {
                                     <button
                                       className="btn"
                                       disabled={!canEdit}
+                                      data-testid="asset-edit-btn"
                                       onClick={() => setImageEditor({ kind: "asset", assetId: asset.id, replaceAllUsages: false })}
                                     >
                                       Edit
@@ -2442,6 +3147,60 @@ export function App() {
         <div className="panelHeader">
           <h2>Preview</h2>
           <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <div className="row" style={{ gap: 6, alignItems: "center" }}>
+              <button
+                className={previewRenderer === "react" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-react"
+                onClick={() => setPreviewRenderer("react")}
+              >
+                React
+              </button>
+              <button
+                className={previewRenderer === "server_saved" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-server"
+                onClick={() =>
+                  void (async () => {
+                    if (page && canEdit && isDirty) {
+                      await save();
+                      if (pageJson !== null && lastSavedJsonRef.current !== pageJson) return;
+                    } else if (page && isDirty) {
+                      toast.info("Server preview uses saved page", "Save to refresh the server-rendered preview.");
+                    }
+                    setPreviewRenderer("server_saved");
+                  })()
+                }
+              >
+                Server (saved)
+              </button>
+              <button
+                className={previewRenderer === "server_draft" ? "btn btnPrimary" : "btn"}
+                data-testid="preview-renderer-server-draft"
+                disabled={!page}
+                onClick={() =>
+                  void (async () => {
+                    if (!page) return;
+                    setPreviewRenderer("server_draft");
+                    setServerDraftHtml(null);
+                    await renderServerDraft(page);
+                  })()
+                }
+              >
+                Server (draft)
+              </button>
+              {previewRenderer === "server_draft" ? (
+                <button
+                  className="btn"
+                  data-testid="preview-renderer-server-draft-refresh"
+                  disabled={!page || isRenderingServerDraft}
+                  onClick={() => {
+                    if (!page) return;
+                    void renderServerDraft(page);
+                  }}
+                >
+                  Refresh
+                </button>
+              ) : null}
+            </div>
             <select
               aria-label="Preview viewport"
               data-testid="preview-viewport"
@@ -2475,7 +3234,40 @@ export function App() {
           <div className="canvas">
             <div className="previewViewport" style={previewDeviceWidth ? { maxWidth: previewDeviceWidth, margin: "0 auto" } : undefined}>
             <div className="preview">
-              {page ? (
+              {page ? previewRenderer === "server_saved" ? (
+                <iframe
+                  data-testid="server-preview-frame"
+                  title="Server preview (saved)"
+                  src={`/api/projects/${encodeURIComponent(activeProjectId)}/preview`}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    minHeight: 520,
+                    border: "1px solid var(--line)",
+                    borderRadius: 12,
+                    background: "white",
+                  }}
+                />
+              ) : previewRenderer === "server_draft" ? (
+                <iframe
+                  data-testid="server-preview-frame"
+                  title="Server preview (draft)"
+                  srcDoc={
+                    serverDraftHtml ??
+                    `<!doctype html><html><head><meta charset="utf-8" /></head><body style="font-family: ui-sans-serif, system-ui; padding: 16px;">${
+                      isRenderingServerDraft ? "Rendering…" : "Click Refresh to render draft."
+                    }</body></html>`
+                  }
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    minHeight: 520,
+                    border: "1px solid var(--line)",
+                    borderRadius: 12,
+                    background: "white",
+                  }}
+                />
+              ) : (
                 <div className="sitePreviewRoot" style={siteCssVarStyle}>
                 <div className="stack" style={{ gap: "var(--site-space-3)" }}>
                   {page.sections
@@ -2541,12 +3333,12 @@ export function App() {
                                 setDragPayload(e, { kind: "section", sectionId: section.id });
                               }}
                               onDragEnd={() => {
-                                setTimeout(() => clearDragPayload(), 0);
+                                scheduleClearDragPayload(0);
                                 setPreviewSectionDropHint(null);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelected({ sectionId: section.id });
+                                selectSectionOnly(section.id);
                               }}
                               title="Drag section"
                             >
@@ -2559,8 +3351,9 @@ export function App() {
                             data-testid="preview-section"
                             data-section-id={section.id}
                             style={{
-                              background: computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? undefined,
-                              padding: section.style.padding !== null ? section.style.padding : undefined,
+                              background:
+                                computeBackgroundValue(section.style.backgroundGradient, section.style.background) ?? "rgba(255,255,255,0.96)",
+                              padding: section.style.padding !== null ? section.style.padding : "var(--site-space-3)",
                               maxWidth: section.style.maxWidth ?? 980,
                             }}
                           >
@@ -2586,7 +3379,7 @@ export function App() {
                           projectId={activeProjectId}
                           isSelected={selected?.sectionId === section.id && selected?.componentId === component.id}
                           canEdit={canEdit}
-                          onSelect={() => setSelected({ sectionId: section.id, componentId: component.id })}
+                          onSelect={() => selectComponentSingle(section.id, component.id)}
                           onUpdate={(next) => updateComponentInPage(section.id, component.id, () => next)}
                           onDelete={() => {
                             if (!canEdit) return;
@@ -2596,7 +3389,8 @@ export function App() {
                               );
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
-                            setSelected((prevSel) => (prevSel?.componentId === component.id ? null : prevSel));
+                            setSelected((prevSel) => (prevSel?.componentId === component.id ? { sectionId: section.id } : prevSel));
+                            setSelectedComponentIds((prevIds) => prevIds.filter((id) => id !== component.id));
                           }}
                           onDuplicate={() => {
                             if (!canEdit) return;
@@ -2635,20 +3429,35 @@ export function App() {
                               if (targetIndex < 0) return prev;
                               const toIndex = position === "after" ? targetIndex + 1 : targetIndex;
 
-                              const nextSections = moveComponentByIndex({
-                                sections: prev.sections,
-                                fromSectionId: actualFromSectionId,
-                                fromComponentId,
-                                toSectionId: section.id,
-                                toIndex,
-                              });
+                              const wantsGroupMove =
+                                selected?.sectionId === actualFromSectionId &&
+                                selectedComponentIds.length > 1 &&
+                                selectedComponentIds.includes(fromComponentId);
+
+                              const nextSections = wantsGroupMove
+                                ? moveComponentsByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentIds: selectedComponentIds,
+                                    toSectionId: section.id,
+                                    toIndex,
+                                  })
+                                : moveComponentByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentId,
+                                    toSectionId: section.id,
+                                    toIndex,
+                                  });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            setSelected((prevSel) =>
-                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                            );
+                            if (selected?.sectionId && selectedComponentIds.length > 1 && selectedComponentIds.includes(fromComponentId)) {
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            } else if (selected?.componentId === fromComponentId) {
+                              selectComponentSingle(section.id, fromComponentId);
+                            }
                           }}
                         />
                       ))}
@@ -2662,20 +3471,35 @@ export function App() {
                               const toSection = prev.sections.find((s) => s.id === section.id);
                               if (!fromSection || !toSection) return prev;
                               const actualFromSectionId = fromSection.id;
-                              const nextSections = moveComponentByIndex({
-                                sections: prev.sections,
-                                fromSectionId: actualFromSectionId,
-                                fromComponentId,
-                                toSectionId: section.id,
-                                toIndex: toSection.components.length,
-                              });
+                              const wantsGroupMove =
+                                selected?.sectionId === actualFromSectionId &&
+                                selectedComponentIds.length > 1 &&
+                                selectedComponentIds.includes(fromComponentId);
+
+                              const nextSections = wantsGroupMove
+                                ? moveComponentsByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentIds: selectedComponentIds,
+                                    toSectionId: section.id,
+                                    toIndex: toSection.components.length,
+                                  })
+                                : moveComponentByIndex({
+                                    sections: prev.sections,
+                                    fromSectionId: actualFromSectionId,
+                                    fromComponentId,
+                                    toSectionId: section.id,
+                                    toIndex: toSection.components.length,
+                                  });
 
                               return PageSchema.parse({ ...prev, sections: nextSections });
                             });
 
-                            setSelected((prevSel) =>
-                              prevSel?.componentId === fromComponentId ? { sectionId: section.id, componentId: fromComponentId } : prevSel
-                            );
+                            if (selected?.sectionId && selectedComponentIds.length > 1 && selectedComponentIds.includes(fromComponentId)) {
+                              setSelected({ sectionId: section.id, componentId: fromComponentId });
+                            } else if (selected?.componentId === fromComponentId) {
+                              selectComponentSingle(section.id, fromComponentId);
+                            }
                           }}
                         />
                       </div>
@@ -2706,10 +3530,32 @@ export function App() {
                 <Inspector
                   section={selectedSection}
                   component={selectedComponent}
+                  selectedComponentIds={selectedComponentIds}
                   imageAssets={imageAssets}
                   onUploadImageAssetOnly={uploadImageAssetOnly}
                   canEdit={canEdit}
-                  onSelect={(componentId) => setSelected({ sectionId: selectedSection.id, componentId })}
+                  onSelect={(componentId, e) => {
+                    const ids = selectedSection.components.map((c) => c.id);
+                    const anchor =
+                      selected?.sectionId === selectedSection.id && selected?.componentId ? selected.componentId : null;
+                    const isToggle = e.metaKey || e.ctrlKey;
+                    const isRange = e.shiftKey;
+
+                    setSelected({ sectionId: selectedSection.id, componentId });
+                    setSelectedComponentIds((prev) => {
+                      if (!isToggle && !isRange) return [componentId];
+                      if (isToggle) {
+                        const next = prev.includes(componentId) ? prev.filter((id) => id !== componentId) : [...prev, componentId];
+                        return next.length ? next : [componentId];
+                      }
+                      if (!anchor) return [componentId];
+                      const from = ids.indexOf(anchor);
+                      const to = ids.indexOf(componentId);
+                      if (from < 0 || to < 0) return [componentId];
+                      const [start, end] = from < to ? [from, to] : [to, from];
+                      return ids.slice(start, end + 1);
+                    });
+                  }}
                   onUpdate={(nextSection) =>
                     updatePage((prev) =>
                       PageSchema.parse({
@@ -2871,17 +3717,17 @@ function PreviewComponent(props: {
     onMoveHere(payload.sectionId, payload.componentId, position);
   };
 
-  const dragProps = {
-    draggable: canEdit && !isSelected,
-    onDragStart: (e: React.DragEvent) => {
-      if (!canEdit) return;
-      setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
-    },
-    onDragEnd: () => {
-      // In some browsers/automation harnesses, `drop` can race with `dragend`.
-      // Defer clearing so drop handlers can still read the in-memory payload if needed.
-      setTimeout(() => clearDragPayload(), 0);
-    },
+	  const dragProps = {
+	    draggable: canEdit,
+	    onDragStart: (e: React.DragEvent) => {
+	      if (!canEdit) return;
+	      setDragPayload(e, { kind: "component", sectionId, componentId: component.id });
+	    },
+	    onDragEnd: () => {
+	      // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	      // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	      scheduleClearDragPayload(250);
+	    },
     onDragOverCapture: onDragOverTarget,
     onDragLeave: (e: React.DragEvent) => {
       const related = e.relatedTarget;
@@ -2985,7 +3831,23 @@ function PreviewComponent(props: {
     const safeHtml = sanitizeRichTextHtml(component.html);
     if (isSelected && canEdit) {
       const runCommand = (command: string) => {
-        richTextRef.current?.focus();
+        const container = richTextRef.current;
+        if (!container) return;
+
+        const selectionBefore = window.getSelection();
+        const rangeBefore =
+          selectionBefore && selectionBefore.rangeCount > 0 ? selectionBefore.getRangeAt(0).cloneRange() : null;
+        const hadSelectionInside =
+          rangeBefore && container.contains(rangeBefore.commonAncestorContainer);
+
+        container.focus();
+        if (hadSelectionInside && rangeBefore) {
+          const selectionAfter = window.getSelection();
+          if (selectionAfter) {
+            selectionAfter.removeAllRanges();
+            selectionAfter.addRange(rangeBefore);
+          }
+        }
         try {
           document.execCommand(command);
         } catch {
@@ -3234,6 +4096,54 @@ function PreviewComponent(props: {
     );
   }
 
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const maxWidth = component.style.maxWidth ?? undefined;
+    const opacity = component.style.opacity ?? 0.55;
+    const color = component.style.color ?? "var(--line)";
+    const blockStyle: React.CSSProperties = {
+      maxWidth,
+      margin: `${marginY}px auto`,
+      width: "100%",
+      pointerEvents: "none",
+    };
+    return (
+      <div
+        className={wrapperClass}
+        data-testid="preview-item"
+        data-component-id={component.id}
+        data-component-type={component.type}
+        {...dragProps}
+        onClick={() => onSelect()}
+      >
+        {showToolbar ? (
+          <div className="previewToolbar" onClick={(e) => e.stopPropagation()}>
+            <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
+              Duplicate
+            </button>
+            <button className="btn btnDanger" data-testid="preview-delete" onClick={() => onDelete()} disabled={!canEdit}>
+              Delete
+            </button>
+          </div>
+        ) : null}
+        <div style={blockStyle}>
+          <hr
+            style={{
+              border: 0,
+              height: thickness,
+              background: color,
+              opacity,
+              borderRadius: Math.max(1, Math.floor(thickness / 2)),
+              margin: 0,
+              width: "100%",
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (component.type === "image") {
     const asset = page.assets.find((a) => a.type === "image" && a.id === component.assetId);
     if (!asset || asset.type !== "image") return null;
@@ -3278,7 +4188,7 @@ function PreviewComponent(props: {
                 }}
               />
             </label>
-            <button className="btn" onClick={() => onEditImage?.()} disabled={!canEdit || !onEditImage}>
+            <button className="btn" data-testid="preview-image-edit" onClick={() => onEditImage?.()} disabled={!canEdit || !onEditImage}>
               Edit
             </button>
             <button className="btn" data-testid="preview-duplicate" onClick={() => onDuplicate()} disabled={!canEdit}>
@@ -3381,13 +4291,14 @@ function PreviewDropZone(props: {
 function Inspector(props: {
   section: Section;
   component: Component | null;
+  selectedComponentIds: string[];
   imageAssets: Array<{ id: string; filename: string; alt: string }>;
   onUploadImageAssetOnly: (file: File) => Promise<{ id: string }>;
   canEdit: boolean;
-  onSelect: (componentId: string) => void;
+  onSelect: (componentId: string, e: React.MouseEvent) => void;
   onUpdate: (next: Section) => void;
 }) {
-  const { section, component, imageAssets, onUploadImageAssetOnly, canEdit, onSelect, onUpdate } = props;
+  const { section, component, selectedComponentIds, imageAssets, onUploadImageAssetOnly, canEdit, onSelect, onUpdate } = props;
   const [selectedImageAssetId, setSelectedImageAssetId] = useState<string>(imageAssets[0]?.id ?? "");
   const [dragOverComponentId, setDragOverComponentId] = useState<string | null>(null);
 
@@ -3439,11 +4350,11 @@ function Inspector(props: {
   );
 
   const removeComponent = useCallback(
-    (componentId: string) => {
+    (componentIds: string[]) => {
       if (!canEdit) return;
       const next: Section = {
         ...section,
-        components: section.components.filter((c) => c.id !== componentId),
+        components: section.components.filter((c) => !componentIds.includes(c.id)),
       };
       onUpdate(next);
     },
@@ -3754,6 +4665,9 @@ function Inspector(props: {
           <button className="btn" onClick={() => add("rich_text")} disabled={!canEdit}>
             + Text
           </button>
+          <button className="btn" data-testid="inspector-add-divider" onClick={() => add("divider")} disabled={!canEdit}>
+            + Divider
+          </button>
           <button className="btn" onClick={() => add("contact_form")} disabled={!canEdit}>
             + Form
           </button>
@@ -3784,21 +4698,33 @@ function Inspector(props: {
               data-testid="inspector-component-row"
               data-component-id={c.id}
               data-component-type={c.type}
+              data-selected={selectedComponentIds.includes(c.id) ? "true" : "false"}
               draggable={canEdit}
               onDragStart={(e) => {
                 if (!canEdit) return;
                 setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
               }}
-              onDragEnd={() => {
-                // In some browsers/automation harnesses, `drop` can race with `dragend`.
-                // Defer clearing so drop handlers can still read the in-memory payload if needed.
-                setTimeout(() => clearDragPayload(), 50);
-              }}
-              style={
-                dragOverComponentId === c.id
-                  ? { justifyContent: "space-between", outline: "2px solid rgba(124, 92, 255, 0.55)", outlineOffset: 2, borderRadius: 12, padding: 4 }
-                  : { justifyContent: "space-between" }
-              }
+	              onDragEnd={() => {
+	                // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	                // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	                scheduleClearDragPayload(250);
+	              }}
+              style={(() => {
+                const base = { justifyContent: "space-between" } as const;
+                const isSelected = selectedComponentIds.includes(c.id);
+                const selectedStyle = isSelected
+                  ? {
+                      ...base,
+                      outline: "2px solid rgba(124, 92, 255, 0.35)",
+                      outlineOffset: 2,
+                      borderRadius: 12,
+                      padding: 4,
+                      background: "rgba(124, 92, 255, 0.06)",
+                    }
+                  : base;
+                if (dragOverComponentId === c.id) return { ...selectedStyle, outline: "2px solid rgba(124, 92, 255, 0.55)" };
+                return selectedStyle;
+              })()}
               onDragOver={(e) => {
                 if (!canEdit) return;
                 const payload = getDragPayload(e);
@@ -3834,31 +4760,39 @@ function Inspector(props: {
                     if (!canEdit) return;
                     setDragPayload(e, { kind: "component", sectionId: section.id, componentId: c.id });
                   }}
-                  onDragEnd={() => {
-                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
-                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
-                    setTimeout(() => clearDragPayload(), 50);
-                  }}
+	                  onDragEnd={() => {
+	                    // In some browsers/automation harnesses, `drop` can race with `dragend`.
+	                    // Defer clearing so drop handlers can still read the in-memory payload if needed.
+	                    scheduleClearDragPayload(250);
+	                  }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   ⋮⋮
                 </span>
-                <button className="btn" onClick={() => onSelect(c.id)}>
+                <button className="btn" data-testid="inspector-component-select" onClick={(e) => onSelect(c.id, e)}>
                   {c.type}
                 </button>
               </div>
               <div className="row">
-                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={!canEdit || idx === 0}>
+                <button className="btn" onClick={() => moveComponent(c.id, -1)} disabled={!canEdit || idx === 0 || selectedComponentIds.length > 1}>
                   ↑
                 </button>
                 <button
                   className="btn"
                   onClick={() => moveComponent(c.id, 1)}
-                  disabled={!canEdit || idx === section.components.length - 1}
+                  disabled={!canEdit || idx === section.components.length - 1 || selectedComponentIds.length > 1}
                 >
                   ↓
                 </button>
-                <button className="btn btnDanger" onClick={() => removeComponent(c.id)} disabled={!canEdit}>
+                <button
+                  className="btn btnDanger"
+                  onClick={() =>
+                    removeComponent(
+                      selectedComponentIds.length > 1 && selectedComponentIds.includes(c.id) ? selectedComponentIds : [c.id]
+                    )
+                  }
+                  disabled={!canEdit}
+                >
                   Remove
                 </button>
                 <span className="badge">{c.id.slice(0, 8)}</span>
@@ -4281,6 +5215,143 @@ function ComponentFields(props: {
     );
   }
 
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const opacity = component.style.opacity ?? 0.55;
+    const opacityPct = Math.round(opacity * 100);
+    return (
+      <div className="stack">
+        <div className="field">
+          <label>Thickness</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-thickness"
+              type="range"
+              min={1}
+              max={12}
+              value={thickness}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, thickness: Number(e.target.value) },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{thickness}px</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, thickness: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Color</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-color"
+              type="color"
+              value={component.style.color ?? "#000000"}
+              disabled={!canEdit}
+              onChange={(e) => onUpdate({ ...component, style: { ...component.style, color: e.target.value } })}
+            />
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, color: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Opacity</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-opacity"
+              type="range"
+              min={5}
+              max={100}
+              value={opacityPct}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, opacity: Number(e.target.value) / 100 },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{opacityPct}%</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, opacity: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Margin Y</label>
+          <div className="row">
+            <input
+              data-testid="divider-style-marginy"
+              type="range"
+              min={0}
+              max={96}
+              value={marginY}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style: { ...component.style, marginY: Number(e.target.value) },
+                })
+              }
+              style={{ flex: 1 }}
+            />
+            <span className="badge">{marginY}px</span>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, marginY: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+
+        <div className="field">
+          <label>Max width</label>
+          <div className="row">
+            <select
+              data-testid="divider-style-maxwidth"
+              value={component.style.maxWidth ?? ""}
+              disabled={!canEdit}
+              onChange={(e) =>
+                onUpdate({
+                  ...component,
+                  style:
+                    e.target.value === ""
+                      ? { ...component.style, maxWidth: null }
+                      : e.target.value === "480"
+                        ? { ...component.style, maxWidth: 480 }
+                        : e.target.value === "720"
+                          ? { ...component.style, maxWidth: 720 }
+                          : e.target.value === "980"
+                            ? { ...component.style, maxWidth: 980 }
+                            : { ...component.style, maxWidth: null },
+                })
+              }
+            >
+              <option value="">(auto)</option>
+              {COMPONENT_MAX_WIDTHS.map((w) => (
+                <option key={w} value={String(w)}>
+                  {w}
+                </option>
+              ))}
+            </select>
+            <button className="btn" disabled={!canEdit} onClick={() => onUpdate({ ...component, style: { ...component.style, maxWidth: null } })}>
+              Auto
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (component.type === "contact_form") {
     return (
       <div className="stack">
@@ -4647,6 +5718,8 @@ function ImageEditorModal(props: {
   const { title, srcUrl, canEdit, replaceAllUsages, onChangeReplaceAllUsages, onCancel, onSave } = props;
   const src = srcUrl();
 
+  type CropHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
@@ -4656,6 +5729,9 @@ function ImageEditorModal(props: {
   const [cropScale, setCropScale] = useState(0.82); // fraction of viewport
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [rotateDeg, setRotateDeg] = useState<0 | 90 | 180 | 270>(0);
+  const [flipH, setFlipH] = useState(false);
+  const [flipV, setFlipV] = useState(false);
   const [outputMaxPx, setOutputMaxPx] = useState(1600);
   const [format, setFormat] = useState<"image/webp" | "image/png" | "image/jpeg">("image/webp");
   const [quality, setQuality] = useState(0.9);
@@ -4679,11 +5755,14 @@ function ImageEditorModal(props: {
     const vw = viewport.w;
     const vh = viewport.h;
 
+    const effectiveNatural =
+      rotateDeg === 90 || rotateDeg === 270 ? { w: natural.h, h: natural.w } : { w: natural.w, h: natural.h };
+
     let desiredAspect: number | null = null;
     if (aspect === "1:1") desiredAspect = 1;
     if (aspect === "4:3") desiredAspect = 4 / 3;
     if (aspect === "16:9") desiredAspect = 16 / 9;
-    if (aspect === "original") desiredAspect = natural.w / natural.h;
+    if (aspect === "original") desiredAspect = effectiveNatural.w / effectiveNatural.h;
 
     const maxW = vw * cropScale;
     const maxH = vh * cropScale;
@@ -4701,11 +5780,11 @@ function ImageEditorModal(props: {
     const cx = (vw - cw) / 2;
     const cy = (vh - ch) / 2;
 
-    const baseScale = Math.max(cw / natural.w, ch / natural.h);
+    const baseScale = Math.max(cw / effectiveNatural.w, ch / effectiveNatural.h);
     const scale = baseScale * zoom;
 
-    const imgHalfW = (natural.w * scale) / 2;
-    const imgHalfH = (natural.h * scale) / 2;
+    const imgHalfW = (effectiveNatural.w * scale) / 2;
+    const imgHalfH = (effectiveNatural.h * scale) / 2;
 
     const minCenterX = cx + cw - imgHalfW;
     const maxCenterX = cx + imgHalfW;
@@ -4729,9 +5808,9 @@ function ImageEditorModal(props: {
       imgTop,
       vw,
       vh,
-      natural,
+      effectiveNatural,
     };
-  }, [aspect, cropScale, natural, offset.x, offset.y, viewport.h, viewport.w, zoom]);
+  }, [aspect, cropScale, natural, offset.x, offset.y, rotateDeg, viewport.h, viewport.w, zoom]);
 
   useEffect(() => {
     if (!computed) return;
@@ -4745,6 +5824,7 @@ function ImageEditorModal(props: {
       if (!computed) return;
       const el = viewportRef.current;
       if (!el) return;
+      el.focus();
       el.setPointerCapture(e.pointerId);
       const start = { x: e.clientX, y: e.clientY };
       const startOffset = { ...offset };
@@ -4764,10 +5844,122 @@ function ImageEditorModal(props: {
     [canEdit, computed, offset]
   );
 
+  const onViewportKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!canEdit) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      }
+
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const nudge = e.shiftKey ? 10 : 1;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x - nudge, y: prev.y }));
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x + nudge, y: prev.y }));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x, y: prev.y - nudge }));
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOffset((prev) => ({ x: prev.x, y: prev.y + nudge }));
+        return;
+      }
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom((prev) => clamp(prev + 0.05, 1, 3));
+        return;
+      }
+      if (e.key === "-") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom((prev) => clamp(prev - 0.05, 1, 3));
+        return;
+      }
+      if (e.key === "0") {
+        e.preventDefault();
+        e.stopPropagation();
+        setZoom(1);
+        setOffset({ x: 0, y: 0 });
+      }
+    },
+    [canEdit]
+  );
+
+  const onCropHandlePointerDown = useCallback(
+    (e: React.PointerEvent, handle: CropHandle) => {
+      if (!canEdit) return;
+      if (!computed) return;
+      const viewportEl = viewportRef.current;
+      if (!viewportEl) return;
+      viewportEl.focus();
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = viewportEl.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const minScale = 0.5;
+      const maxScale = 0.95;
+
+      const updateFromPointer = (clientX: number, clientY: number) => {
+        const halfW =
+          handle.includes("w") ? Math.max(18, centerX - clientX) : handle.includes("e") ? Math.max(18, clientX - centerX) : rect.width / 2;
+        const halfH =
+          handle.includes("n") ? Math.max(18, centerY - clientY) : handle.includes("s") ? Math.max(18, clientY - centerY) : rect.height / 2;
+
+        const scaleW = (2 * halfW) / rect.width;
+        const scaleH = (2 * halfH) / rect.height;
+
+        let next = cropScale;
+        if (handle === "e" || handle === "w") next = scaleW;
+        else if (handle === "n" || handle === "s") next = scaleH;
+        else next = Math.max(scaleW, scaleH);
+
+        setCropScale(clamp(next, minScale, maxScale));
+      };
+
+      const startTarget = e.currentTarget as HTMLElement;
+      startTarget.setPointerCapture(e.pointerId);
+      updateFromPointer(e.clientX, e.clientY);
+
+      const onMove = (ev: PointerEvent) => updateFromPointer(ev.clientX, ev.clientY);
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [canEdit, computed, cropScale]
+  );
+
   const renderToFile = useCallback(async (): Promise<File> => {
     if (!computed || !imgRef.current) throw new Error("Image is not ready yet.");
 
-    const { crop, imgLeft, imgTop, scale, natural: nat } = computed;
+    const { crop, imgLeft, imgTop, scale, effectiveNatural: nat } = computed;
     const sx = (crop.x - imgLeft) / scale;
     const sy = (crop.y - imgTop) / scale;
     const sw = crop.w / scale;
@@ -4787,6 +5979,22 @@ function ImageEditorModal(props: {
       outW = Math.max(1, Math.round(outH * ratio));
     }
 
+    const transformed = document.createElement("canvas");
+    transformed.width = nat.w;
+    transformed.height = nat.h;
+    const tctx = transformed.getContext("2d");
+    if (!tctx) throw new Error("Missing 2d context");
+
+    tctx.imageSmoothingEnabled = true;
+    tctx.imageSmoothingQuality = "high";
+    tctx.save();
+    tctx.translate(nat.w / 2, nat.h / 2);
+    tctx.rotate((rotateDeg * Math.PI) / 180);
+    tctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+    if (!natural) throw new Error("Missing image dimensions");
+    tctx.drawImage(imgRef.current, -natural.w / 2, -natural.h / 2, natural.w, natural.h);
+    tctx.restore();
+
     const canvas = document.createElement("canvas");
     canvas.width = outW;
     canvas.height = outH;
@@ -4795,7 +6003,7 @@ function ImageEditorModal(props: {
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(imgRef.current, clampedSx, clampedSy, clampedSw, clampedSh, 0, 0, outW, outH);
+    ctx.drawImage(transformed, clampedSx, clampedSy, clampedSw, clampedSh, 0, 0, outW, outH);
 
     const blob =
       (await canvasToBlob(canvas, format, format === "image/png" ? undefined : quality).catch(() => null)) ??
@@ -4805,7 +6013,7 @@ function ImageEditorModal(props: {
 
     const ext = blob.type === "image/webp" ? "webp" : blob.type === "image/jpeg" ? "jpg" : "png";
     return new File([blob], `edited.${ext}`, { type: blob.type });
-  }, [computed, format, outputMaxPx, quality]);
+  }, [computed, flipH, flipV, format, natural, outputMaxPx, quality, rotateDeg]);
 
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" onClick={() => onCancel()}>
@@ -4825,12 +6033,22 @@ function ImageEditorModal(props: {
         <div className="modalBody">
           {src ? (
             <div className="stack" style={{ gap: 12 }}>
-              <div className="cropViewport" ref={viewportRef} onPointerDown={onPointerDown}>
+              <div
+                className="cropViewport"
+                ref={viewportRef}
+                data-testid="image-editor-viewport"
+                tabIndex={canEdit ? 0 : -1}
+                aria-label="Image crop viewport"
+                aria-describedby="image-editor-tip"
+                onPointerDown={onPointerDown}
+                onKeyDown={onViewportKeyDown}
+              >
                 <img
                   ref={imgRef}
                   src={src}
                   alt=""
                   draggable={false}
+                  data-testid="image-editor-image"
                   onLoad={(e) => {
                     const el = e.currentTarget;
                     setNatural({ w: el.naturalWidth, h: el.naturalHeight });
@@ -4843,7 +6061,7 @@ function ImageEditorModal(props: {
                           position: "absolute",
                           left: "50%",
                           top: "50%",
-                          transform: `translate(-50%, -50%) translate(${computed.clampedOffset.x}px, ${computed.clampedOffset.y}px) scale(${computed.scale})`,
+                          transform: `translate(-50%, -50%) translate(${computed.clampedOffset.x}px, ${computed.clampedOffset.y}px) rotate(${rotateDeg}deg) scale(${computed.scale * (flipH ? -1 : 1)}, ${computed.scale * (flipV ? -1 : 1)})`,
                           transformOrigin: "center center",
                           willChange: "transform",
                           userSelect: "none",
@@ -4863,22 +6081,84 @@ function ImageEditorModal(props: {
                 {computed ? (
                   <div
                     className="cropBox"
+                    data-testid="image-editor-cropbox"
                     style={{
                       left: computed.crop.x,
                       top: computed.crop.y,
                       width: computed.crop.w,
                       height: computed.crop.h,
                     }}
-                  />
+                  >
+                    {canEdit ? (
+                      <>
+                        <div
+                          className="cropHandle"
+                          data-dir="nw"
+                          data-testid="image-editor-crophandle-nw"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "nw")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="n"
+                          data-testid="image-editor-crophandle-n"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "n")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="ne"
+                          data-testid="image-editor-crophandle-ne"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "ne")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="e"
+                          data-testid="image-editor-crophandle-e"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "e")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="se"
+                          data-testid="image-editor-crophandle-se"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "se")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="s"
+                          data-testid="image-editor-crophandle-s"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "s")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="sw"
+                          data-testid="image-editor-crophandle-sw"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "sw")}
+                        />
+                        <div
+                          className="cropHandle"
+                          data-dir="w"
+                          data-testid="image-editor-crophandle-w"
+                          onPointerDown={(e) => onCropHandlePointerDown(e, "w")}
+                        />
+                      </>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
 
               {error ? <div className="card">{error}</div> : null}
+              <div className="muted" id="image-editor-tip">
+                Tip: drag to pan • resize handles adjust crop size • Arrow keys nudge (Shift = bigger) • +/- zoom • 0 resets view
+              </div>
 
               <div className="row" style={{ gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div className="field" style={{ minWidth: 160 }}>
                   <label>Aspect</label>
-                  <select value={aspect} onChange={(e) => setAspect(e.target.value)} disabled={!canEdit}>
+                  <select
+                    data-testid="image-editor-aspect"
+                    value={aspect}
+                    onChange={(e) => setAspect(e.target.value)}
+                    disabled={!canEdit}
+                  >
                     <option value="free">free</option>
                     <option value="original">original</option>
                     <option value="1:1">1:1</option>
@@ -4890,6 +6170,7 @@ function ImageEditorModal(props: {
                 <div className="field" style={{ minWidth: 220, flex: 1 }}>
                   <label>Zoom</label>
                   <input
+                    data-testid="image-editor-zoom"
                     type="range"
                     min={1}
                     max={3}
@@ -4903,6 +6184,7 @@ function ImageEditorModal(props: {
                 <div className="field" style={{ minWidth: 220, flex: 1 }}>
                   <label>Crop size</label>
                   <input
+                    data-testid="image-editor-cropscale"
                     type="range"
                     min={0.5}
                     max={0.95}
@@ -4911,6 +6193,66 @@ function ImageEditorModal(props: {
                     disabled={!canEdit}
                     onChange={(e) => setCropScale(Number(e.target.value))}
                   />
+                </div>
+
+                <div className="field" style={{ minWidth: 230 }}>
+                  <label>Transform</label>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      className="btn"
+                      data-testid="image-editor-rotate-left"
+                      disabled={!canEdit}
+                      onClick={() => setRotateDeg((prev) => (prev === 0 ? 270 : prev === 90 ? 0 : prev === 180 ? 90 : 180))}
+                      title="Rotate left (90°)"
+                    >
+                      Rotate ↺
+                    </button>
+                    <button
+                      className="btn"
+                      data-testid="image-editor-rotate-right"
+                      disabled={!canEdit}
+                      onClick={() => setRotateDeg((prev) => (prev === 0 ? 90 : prev === 90 ? 180 : prev === 180 ? 270 : 0))}
+                      title="Rotate right (90°)"
+                    >
+                      Rotate ↻
+                    </button>
+                    <button
+                      className={flipH ? "btn btnPrimary" : "btn"}
+                      data-testid="image-editor-flip-h"
+                      disabled={!canEdit}
+                      onClick={() => setFlipH((v) => !v)}
+                      title="Flip horizontally"
+                    >
+                      Flip H
+                    </button>
+                    <button
+                      className={flipV ? "btn btnPrimary" : "btn"}
+                      data-testid="image-editor-flip-v"
+                      disabled={!canEdit}
+                      onClick={() => setFlipV((v) => !v)}
+                      title="Flip vertically"
+                    >
+                      Flip V
+                    </button>
+                    {rotateDeg !== 0 || flipH || flipV ? (
+                      <button
+                        className="btn"
+                        data-testid="image-editor-transform-reset"
+                        disabled={!canEdit}
+                        onClick={() => {
+                          setRotateDeg(0);
+                          setFlipH(false);
+                          setFlipV(false);
+                        }}
+                        title="Reset transform"
+                      >
+                        Reset
+                      </button>
+                    ) : null}
+                    <span className="badge" title="Rotation">
+                      {rotateDeg}°
+                    </span>
+                  </div>
                 </div>
 
                 <div className="field" style={{ width: 130 }}>

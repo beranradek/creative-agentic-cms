@@ -1,5 +1,19 @@
 import { resolveTheme, resolvedThemeToCssVars, type Asset, type Component, type Page, type Section } from "@cac/shared";
+import { normalizeBaseUrl } from "../export-config.js";
 import { sanitizeRichTextHtml } from "../sanitize/rich-text.js";
+
+type ContactFormExportConfig = {
+  mode: "disabled" | "formspree" | "netlify" | "custom";
+  actionUrl: string | null;
+  netlifyFormName: string | null;
+  successRedirectUrl: string | null;
+};
+
+type RenderPageOptions = {
+  baseUrl?: string | null;
+  analyticsHtml?: string | null;
+  contactForm?: ContactFormExportConfig;
+};
 
 function escapeHtml(text: string): string {
   return text
@@ -74,7 +88,7 @@ function renderButtonStyle(style: {
   return styles.join("");
 }
 
-function renderComponent(component: Component, assetsById: Map<string, Asset>): string {
+function renderComponent(component: Component, assetsById: Map<string, Asset>, options?: RenderPageOptions): string {
   if (component.type === "hero") {
     const bgAsset =
       component.backgroundImageAssetId && component.backgroundImageAssetId.length
@@ -105,6 +119,24 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const styleAttr = style ? ` style="${style}"` : "";
     const safe = sanitizeRichTextHtml(component.html);
     return `<div class="richText"${styleAttr}>${safe}</div>`;
+  }
+
+  if (component.type === "divider") {
+    const thickness = component.style.thickness ?? 2;
+    const marginY = component.style.marginY ?? 18;
+    const maxWidth = component.style.maxWidth;
+    const opacity = component.style.opacity ?? 0.55;
+    const color = component.style.color ?? "var(--line)";
+    const styles: string[] = [];
+    styles.push("border:0;");
+    styles.push(`height:${thickness}px;`);
+    styles.push(`background:${escapeHtml(color)};`);
+    styles.push(`opacity:${opacity};`);
+    styles.push(`border-radius:${Math.max(1, Math.floor(thickness / 2))}px;`);
+    styles.push(`margin:${marginY}px auto;`);
+    styles.push("width:100%;");
+    if (maxWidth !== null) styles.push(`max-width:${maxWidth}px;`);
+    return `<hr class="divider" style="${styles.join("")}" />`;
   }
 
   if (component.type === "image") {
@@ -144,10 +176,34 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
     const styleAttr = boxStyle ? ` style="${boxStyle}"` : "";
     const justify = renderButtonJustify(component.style.textAlign);
     const submitStyle = renderButtonStyle(component.submitStyle);
+    const cfg: ContactFormExportConfig = {
+      mode: options?.contactForm?.mode ?? "disabled",
+      actionUrl: options?.contactForm?.actionUrl ?? null,
+      netlifyFormName: options?.contactForm?.netlifyFormName ?? null,
+      successRedirectUrl: options?.contactForm?.successRedirectUrl ?? null,
+    };
+
+    let formAttrs = `method="post"`;
+    let honeypot = "";
+    let hidden = "";
+    if (cfg.mode === "disabled") {
+      formAttrs += ` action="#" onsubmit="return false;"`;
+    } else if (cfg.mode === "netlify") {
+      const name = cfg.netlifyFormName ?? "contact";
+      formAttrs += ` data-netlify="true" netlify-honeypot="bot-field" name="${escapeHtml(name)}"`;
+      if (cfg.successRedirectUrl) formAttrs += ` action="${escapeHtml(cfg.successRedirectUrl)}"`;
+      hidden += `<input type="hidden" name="form-name" value="${escapeHtml(name)}" />`;
+      honeypot = `<p style="display:none;"><label>Don’t fill this out: <input name="bot-field" /></label></p>`;
+    } else {
+      const action = cfg.actionUrl ?? "#";
+      formAttrs += ` action="${escapeHtml(action)}"`;
+    }
     return `
       <div class="contactForm" id="contact"${styleAttr}>
         <h3>${escapeHtml(component.headline)}</h3>
-        <form method="post" action="#" onsubmit="return false;">
+        <form ${formAttrs}>
+          ${honeypot}
+          ${hidden}
           <div class="field">
             <label>Name</label>
             <input name="name" />
@@ -169,7 +225,7 @@ function renderComponent(component: Component, assetsById: Map<string, Asset>): 
   return "";
 }
 
-function renderSection(section: Section, assetsById: Map<string, Asset>): string {
+function renderSection(section: Section, assetsById: Map<string, Asset>, options?: RenderPageOptions): string {
   if (!section.settings.visible) return "";
 
   const styles: string[] = [];
@@ -183,7 +239,8 @@ function renderSection(section: Section, assetsById: Map<string, Asset>): string
   }
   if (section.style.padding !== null) styles.push(`padding:${section.style.padding}px;`);
   if (section.style.maxWidth !== null) styles.push(`max-width:${section.style.maxWidth}px;margin:0 auto;`);
-  if ((sectionGradientFrom && sectionGradientTo) || section.style.background || section.style.padding !== null) styles.push("border-radius:18px;");
+  if ((sectionGradientFrom && sectionGradientTo) || section.style.background || section.style.padding !== null)
+    styles.push("border-radius:var(--site-radius);");
 
   const styleAttr = styles.length ? ` style="${styles.join("")}"` : "";
 
@@ -202,7 +259,7 @@ function renderSection(section: Section, assetsById: Map<string, Asset>): string
   }
   const innerStyleAttr = innerStyles.length ? ` style="${innerStyles.join("")}"` : "";
 
-  const inner = section.components.map((c) => renderComponent(c, assetsById)).join("\n");
+  const inner = section.components.map((c) => renderComponent(c, assetsById, options)).join("\n");
   return `<section class="section"${styleAttr}>
 <div class="sectionInner"${innerStyleAttr}>
 ${inner}
@@ -210,7 +267,10 @@ ${inner}
 </section>`;
 }
 
-export function renderPageHtml(page: Page): { html: string; css: string } {
+export function renderPageHtml(
+  page: Page,
+  options?: RenderPageOptions
+): { html: string; css: string } {
   const resolvedTheme = resolveTheme(page.theme);
   const cssVars = resolvedThemeToCssVars(resolvedTheme);
   const cssVarBlock = Object.entries(cssVars)
@@ -247,7 +307,83 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
 
   const assetsById = new Map(page.assets.map((a) => [a.id, a]));
 
-  const body = page.sections.map((s) => renderSection(s, assetsById)).join("\n");
+  const body = page.sections.map((s) => renderSection(s, assetsById, options)).join("\n");
+
+  const normalizedBaseUrl =
+    options?.baseUrl && typeof options.baseUrl === "string" && options.baseUrl.trim() ? normalizeBaseUrl(options.baseUrl) : null;
+  const canonicalUrl = normalizedBaseUrl ? normalizedBaseUrl + "/" : null;
+
+  let ogImage:
+    | null
+    | {
+        filename: string;
+        alt: string;
+        width: number | null;
+        height: number | null;
+      } = null;
+  try {
+    let ogImageAssetId: string | null = null;
+
+    for (const section of page.sections) {
+      for (const c of section.components) {
+        if (c.type === "hero" && c.backgroundImageAssetId) {
+          ogImageAssetId = c.backgroundImageAssetId;
+          break;
+        }
+      }
+      if (ogImageAssetId) break;
+    }
+
+    if (!ogImageAssetId) {
+      for (const section of page.sections) {
+        for (const c of section.components) {
+          if (c.type === "image") {
+            ogImageAssetId = c.assetId;
+            break;
+          }
+        }
+        if (ogImageAssetId) break;
+      }
+    }
+
+    if (!ogImageAssetId) {
+      const firstImage = page.assets.find((a) => a.type === "image");
+      ogImageAssetId = firstImage?.type === "image" ? firstImage.id : null;
+    }
+
+    const asset = ogImageAssetId ? assetsById.get(ogImageAssetId) : null;
+    if (asset && asset.type === "image") {
+      ogImage = {
+        filename: asset.filename,
+        alt: asset.alt,
+        width: asset.width,
+        height: asset.height,
+      };
+    }
+  } catch {
+    ogImage = null;
+  }
+
+  const socialMeta: string[] = [];
+  socialMeta.push(`<meta property="og:type" content="website" />`);
+  if (canonicalUrl) socialMeta.push(`<meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`);
+  socialMeta.push(`<meta property="og:title" content="${escapeHtml(page.metadata.title)}" />`);
+  socialMeta.push(`<meta property="og:description" content="${escapeHtml(page.metadata.description)}" />`);
+  if (ogImage) {
+    socialMeta.push(`<meta property="og:image" content="assets/${escapeHtml(ogImage.filename)}" />`);
+    if (ogImage.width !== null) socialMeta.push(`<meta property="og:image:width" content="${ogImage.width}" />`);
+    if (ogImage.height !== null) socialMeta.push(`<meta property="og:image:height" content="${ogImage.height}" />`);
+    if (ogImage.alt) socialMeta.push(`<meta property="og:image:alt" content="${escapeHtml(ogImage.alt)}" />`);
+  }
+  socialMeta.push(`<meta name="twitter:card" content="${ogImage ? "summary_large_image" : "summary"}" />`);
+  socialMeta.push(`<meta name="twitter:title" content="${escapeHtml(page.metadata.title)}" />`);
+  socialMeta.push(`<meta name="twitter:description" content="${escapeHtml(page.metadata.description)}" />`);
+  if (ogImage) socialMeta.push(`<meta name="twitter:image" content="assets/${escapeHtml(ogImage.filename)}" />`);
+
+  const analyticsHtml =
+    options?.analyticsHtml && typeof options.analyticsHtml === "string" && options.analyticsHtml.trim()
+      ? options.analyticsHtml.trim()
+      : null;
 
   const html = `<!doctype html>
 <html lang="${escapeHtml(page.metadata.lang)}">
@@ -256,6 +392,9 @@ export function renderPageHtml(page: Page): { html: string; css: string } {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(page.metadata.title)}</title>
     <meta name="description" content="${escapeHtml(page.metadata.description)}" />
+    ${canonicalUrl ? `<link rel="canonical" href="${escapeHtml(canonicalUrl)}" />` : ""}
+    ${socialMeta.join("\n    ")}
+    ${analyticsHtml ? analyticsHtml : ""}
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>

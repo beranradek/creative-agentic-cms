@@ -64,10 +64,17 @@ export const PageThemeSchema = z
   })
   .default({});
 
+const AssetFilenameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
+  .refine((v) => !v.includes(".."), { message: "Asset filename must not contain '..'" });
+
 export const ImageAssetSchema = z.object({
   id: AssetIdSchema,
   type: z.literal("image"),
-  filename: z.string().min(1),
+  filename: AssetFilenameSchema,
   mimeType: z.string().min(1),
   width: z.number().int().positive().nullable().default(null),
   height: z.number().int().positive().nullable().default(null),
@@ -161,11 +168,26 @@ export const ContactFormComponentSchema = z.object({
     .default({}),
 });
 
+export const DividerComponentSchema = z.object({
+  id: ComponentIdSchema,
+  type: z.literal("divider"),
+  style: z
+    .object({
+      thickness: z.number().int().min(1).max(12).nullable().default(null),
+      color: BackgroundColorSchema,
+      maxWidth: ComponentMaxWidthSchema,
+      marginY: z.number().int().min(0).max(96).nullable().default(null),
+      opacity: z.number().min(0.05).max(1).nullable().default(null),
+    })
+    .default({}),
+});
+
 export const ComponentSchema = z.discriminatedUnion("type", [
   HeroComponentSchema,
   RichTextComponentSchema,
   ImageComponentSchema,
   ContactFormComponentSchema,
+  DividerComponentSchema,
 ]);
 
 export const SECTION_MAX_WIDTHS = [720, 980, 1200] as const;

@@ -7,10 +7,19 @@
     "dev": "node scripts/dev.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
-    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @cac/shared build && pnpm -r test",
     "test:e2e": "pnpm --filter @cac/web test:e2e",
     "dev:server": "pnpm --filter @cac/server dev",
     "dev:web": "pnpm --filter @cac/web dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.35.0",
+    "eslint": "9.35.0",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "globals": "16.4.0",
+    "typescript-eslint": "8.44.1"
   }
 }

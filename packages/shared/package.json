@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "build:watch": "tsc -p tsconfig.json -w --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "pnpm run typecheck",
+    "lint": "pnpm -w lint",
     "test": "vitest run"
   },
   "dependencies": {

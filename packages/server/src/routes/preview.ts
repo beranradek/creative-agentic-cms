@@ -2,6 +2,7 @@ import { cp, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
 import { z, type ZodType } from "zod";
+import { PageSchema } from "@cac/shared";
 import type { ProjectStore } from "../project-store.js";
 import { renderPageHtml } from "../render/render-page.js";
 
@@ -13,6 +14,37 @@ interface CreatePreviewRouterOptions {
 export function createPreviewRouter(options: CreatePreviewRouterOptions): express.Router {
   const { store, projectIdSchema } = options;
   const router = express.Router({ mergeParams: true });
+
+  router.get("/", async (req, res) => {
+    const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
+    const page = await store.readPage(projectId);
+    const { html, css } = renderPageHtml(page);
+
+    res
+      .status(200)
+      .type("html")
+      .send(
+        html.replace(
+          "</head>",
+          `<style>\n${css}\n</style>\n</head>`
+        )
+      );
+  });
+
+  router.post("/render", async (req, res) => {
+    const page = PageSchema.parse(req.body);
+    const { html, css } = renderPageHtml(page);
+
+    res
+      .status(200)
+      .type("html")
+      .send(
+        html.replace(
+          "</head>",
+          `<style>\n${css}\n</style>\n</head>`
+        )
+      );
+  });
 
   router.post("/screenshot", async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);

@@ -6,6 +6,7 @@ import { z, type ZodType } from "zod";
 import imageSize from "image-size";
 import { AssetIdSchema, ImageAssetSchema } from "@cac/shared";
 import type { ProjectStore } from "../project-store.js";
+import { renderPlaceholderSvg } from "../placeholder-svg.js";
 
 interface CreateAssetRouterOptions {
   store: ProjectStore;
@@ -32,6 +33,41 @@ function createAssetId(): string {
 export function createAssetRouter(options: CreateAssetRouterOptions): express.Router {
   const { store, projectIdSchema } = options;
   const router = express.Router({ mergeParams: true });
+
+  router.post("/images/placeholder", express.json({ limit: "64kb" }), async (req, res) => {
+    const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);
+    const text = z.string().min(1).max(120).parse((req.body as { text?: unknown } | undefined)?.text);
+    const width = z.number().int().positive().max(4096).optional().parse((req.body as { width?: unknown } | undefined)?.width);
+    const height = z.number().int().positive().max(4096).optional().parse((req.body as { height?: unknown } | undefined)?.height);
+    const alt = z.string().max(240).optional().parse((req.body as { alt?: unknown } | undefined)?.alt);
+
+    const assetId = createAssetId();
+    const filename = `${assetId}.svg`;
+
+    await store.ensureProject(projectId);
+    const assetsDir = store.getAssetsDir(projectId);
+    await mkdir(assetsDir, { recursive: true });
+
+    const svg = renderPlaceholderSvg({
+      text,
+      ...(typeof width === "number" ? { width } : {}),
+      ...(typeof height === "number" ? { height } : {}),
+    });
+    const targetPath = path.join(assetsDir, filename);
+    await writeFile(targetPath, svg, "utf8");
+
+    const asset = ImageAssetSchema.parse({
+      id: assetId,
+      type: "image",
+      filename,
+      mimeType: "image/svg+xml",
+      width: width ?? null,
+      height: height ?? null,
+      alt: alt ?? text,
+    });
+
+    res.json({ asset });
+  });
 
   router.post("/images", upload.single("file"), async (req, res) => {
     const projectId = projectIdSchema.parse((req.params as { projectId?: string }).projectId);

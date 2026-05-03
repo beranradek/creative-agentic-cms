@@ -69,6 +69,9 @@ Rules:
   - sec_<uuid> for sections
   - cmp_<uuid> for components
   - img_<uuid> for image assets
+- When the user explicitly asks you to add an image but no suitable asset exists, create an SVG placeholder asset:
+  - Create a new image asset with id img_<uuid>, filename "<id>.svg", mimeType "image/svg+xml", and set width/height when known.
+  - Use asset.alt as the placeholder text (short, descriptive). Use that asset in a new image component.
 - Keep rich_text.html valid, minimal HTML (p, ul, ol, li, strong, em, a).
 - Make small, user-requested changes only. Avoid "creative rewrites" unless explicitly asked.
 - Do NOT delete sections/components/assets unless the user explicitly asks for deletion/removal.
@@ -90,7 +93,11 @@ rich_text:
 
 image:
 - Prefer editing caption/asset alt text and style (fit, align, maxWidth, radius, focalX/focalY).
-- Do not invent new assets unless explicitly asked to add an image.
+- Do not invent new assets unless explicitly asked to add an image. If asked, prefer adding an SVG placeholder asset (<id>.svg).
+
+divider:
+- Use for simple visual separation between content blocks.
+- Only edit style fields (thickness/color/maxWidth/marginY/opacity) when requested.
 
 contact_form:
 - Only edit headline and submitLabel (no new fields).
@@ -198,6 +205,16 @@ function describeComponent(component: Component, assetsById: Map<string, Asset>)
     if (component.style.radius !== null) styleParts.push(`radius=${component.style.radius}px`);
     const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
     return `image: asset=${component.assetId} file=${file}${styleText} caption="${truncate(component.caption, 80)}"`;
+  }
+  if (component.type === "divider") {
+    const styleParts: string[] = [];
+    if (component.style.thickness !== null) styleParts.push(`thickness=${component.style.thickness}px`);
+    if (component.style.color) styleParts.push(`color=${component.style.color}`);
+    if (component.style.maxWidth !== null) styleParts.push(`maxW=${component.style.maxWidth}px`);
+    if (component.style.marginY !== null) styleParts.push(`marginY=${component.style.marginY}px`);
+    if (component.style.opacity !== null) styleParts.push(`opacity=${component.style.opacity}`);
+    const styleText = styleParts.length ? ` {${styleParts.join(" ")}}` : "";
+    return `divider${styleText}`;
   }
   if (component.type === "contact_form") {
     const styleParts: string[] = [];

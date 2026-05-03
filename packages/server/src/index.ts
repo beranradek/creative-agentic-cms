@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -11,6 +12,7 @@ import { ProjectStore } from "./project-store.js";
 import { createAssetRouter } from "./routes/assets.js";
 import { createAgentRouter } from "./routes/agent.js";
 import { createExportRouter } from "./routes/export.js";
+import { createExportConfigRouter } from "./routes/export-config.js";
 import { createPreviewRouter } from "./routes/preview.js";
 import { createImagegenRouter } from "./routes/imagegen.js";
 
@@ -192,6 +194,11 @@ app.put("/api/projects/:projectId/page", async (req, res, next) => {
 
 app.use("/api/projects/:projectId/assets", requireEditorSession, createAssetRouter({ store, projectIdSchema: ProjectIdSchema }));
 app.use("/api/projects/:projectId/agent", requireEditorSession, createAgentRouter({ store, projectIdSchema: ProjectIdSchema }));
+app.use(
+  "/api/projects/:projectId/export-config",
+  requireEditorSession,
+  createExportConfigRouter({ store, projectIdSchema: ProjectIdSchema })
+);
 app.use("/api/projects/:projectId/export", requireEditorSession, createExportRouter({ store, projectIdSchema: ProjectIdSchema }));
 if (config.OPENAI_API_KEY) {
   app.use(
@@ -200,7 +207,6 @@ if (config.OPENAI_API_KEY) {
     createImagegenRouter({ store, projectIdSchema: ProjectIdSchema, apiKey: config.OPENAI_API_KEY, model: config.IMAGEGEN_MODEL })
   );
 }
-
 app.use("/api/projects/:projectId/preview", requireEditorSession, createPreviewRouter({ store, projectIdSchema: ProjectIdSchema }));
 
 app.use("/projects", (req, res, next) => {
@@ -217,7 +223,28 @@ app.use("/projects", (req, res, next) => {
 });
 app.use("/projects", express.static(dataDirAbs, { fallthrough: true }));
 
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+if (config.SERVE_WEB) {
+  const webDistAbs = path.resolve(projectRoot, config.WEB_DIST_DIR);
+  const indexHtmlAbs = path.join(webDistAbs, "index.html");
+
+  if (!fs.existsSync(indexHtmlAbs)) {
+    console.warn(
+      `[server] SERVE_WEB is enabled but WEB_DIST_DIR does not contain index.html: ${indexHtmlAbs}`
+    );
+  } else {
+    app.use(express.static(webDistAbs, { index: false }));
+    app.get("*", (req, res, next) => {
+      if (req.method !== "GET") return next();
+      if (req.path.startsWith("/api") || req.path.startsWith("/projects")) return next();
+      const accept = req.header("accept") ?? "";
+      if (accept && !accept.includes("text/html") && accept !== "*/*") return next();
+      res.sendFile(indexHtmlAbs);
+    });
+  }
+}
+
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  void next;
   if (error instanceof z.ZodError) {
     res.status(400).json({ error: "Invalid request." });
     return;

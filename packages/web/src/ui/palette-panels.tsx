@@ -1,9 +1,7 @@
 import React from "react";
 import {
   THEME_PRESETS,
-  type Component,
   type Page,
-  type Section,
   resolveTheme,
 } from "@cac/shared";
 import { clearDragPayload, getDragPayload, setDragPayload } from "./editor-dnd.js";

@@ -432,7 +432,7 @@ body {
   width: 100%;
   max-width: 980px;
   margin: 0 auto;
-  border-radius: 18px;
+  border-radius: var(--site-radius);
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
@@ -608,6 +608,68 @@ body {
   border-radius: 14px;
   border: 2px solid rgba(15, 23, 42, 0.85);
   box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+
+.cropViewport:focus {
+  outline: 2px solid rgba(124, 92, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.cropHandle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.55);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.18);
+  pointer-events: auto;
+}
+
+.cropHandle[data-dir="nw"] {
+  left: -8px;
+  top: -8px;
+  cursor: nwse-resize;
+}
+.cropHandle[data-dir="n"] {
+  left: 50%;
+  top: -8px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+.cropHandle[data-dir="ne"] {
+  right: -8px;
+  top: -8px;
+  cursor: nesw-resize;
+}
+.cropHandle[data-dir="e"] {
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+.cropHandle[data-dir="se"] {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
+}
+.cropHandle[data-dir="s"] {
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+.cropHandle[data-dir="sw"] {
+  left: -8px;
+  bottom: -8px;
+  cursor: nesw-resize;
+}
+.cropHandle[data-dir="w"] {
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
 }
 
 .sitePreviewRoot .hero {

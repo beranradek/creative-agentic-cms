@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import express from "express";
 import { z, type ZodType } from "zod";
 import {
@@ -13,6 +13,11 @@ import {
 import { PageSchema } from "@cac/shared";
 import { createDefaultPage } from "../default-page.js";
 import type { ProjectStore } from "../project-store.js";
+import {
+  cleanupStagedPlaceholderFiles,
+  finalizeStagedPlaceholderFiles,
+  stageMissingSvgPlaceholderAssets,
+} from "../placeholder-materialize.js";
 import { renderPageHtml } from "../render/render-page.js";
 
 interface CreateAgentRouterOptions {
@@ -85,12 +90,21 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
 
     try {
       const { summary } = validateAgentEdit(body.basePage, body.proposedPage, body.message, { budget });
+
+      await store.ensureProject(projectId);
+      const assetsDir = store.getAssetsDir(projectId);
+      await mkdir(assetsDir, { recursive: true });
+      const stagedPlaceholders = await stageMissingSvgPlaceholderAssets(assetsDir, body.proposedPage.assets);
+
       const writeResult = await store.writePageIfMatch(projectId, body.proposedPage, currentEtag);
       if (!writeResult.ok) {
+        await cleanupStagedPlaceholderFiles(stagedPlaceholders);
         if (writeResult.etag) res.setHeader("ETag", writeResult.etag);
         res.status(409).json({ error: "conflict", page: writeResult.page });
         return;
       }
+      await finalizeStagedPlaceholderFiles(stagedPlaceholders);
+
       res.setHeader("ETag", writeResult.etag);
       res.json({ ok: true, applied: true, page: body.proposedPage, diffSummary: summary });
     } catch (error) {
@@ -184,12 +198,21 @@ export function createAgentRouter(options: CreateAgentRouterOptions): express.Ro
 
         try {
           const { summary } = validateAgentEdit(page, nextPage, body.message, { budget });
+
+          await store.ensureProject(projectId);
+          const assetsDir = store.getAssetsDir(projectId);
+          await mkdir(assetsDir, { recursive: true });
+          const stagedPlaceholders = await stageMissingSvgPlaceholderAssets(assetsDir, nextPage.assets);
+
           const writeResult = await store.writePageIfMatch(projectId, nextPage, baseEtag);
           if (!writeResult.ok) {
+            await cleanupStagedPlaceholderFiles(stagedPlaceholders);
             if (writeResult.etag) res.setHeader("ETag", writeResult.etag);
             res.status(409).json({ error: "conflict", page: writeResult.page });
             return;
           }
+          await finalizeStagedPlaceholderFiles(stagedPlaceholders);
+
           res.setHeader("ETag", writeResult.etag);
           res.json({ assistantMessage: output.assistantMessage, applied: true, page: nextPage, diffSummary: summary });
           return;
