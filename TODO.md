@@ -42,11 +42,11 @@ It is organized by milestones and designed to be executed incrementally with con
 
 ## Milestone 3 — In-site Editing (WYSIWYG everywhere)
 
-- [ ] Selection model:
+- [x] Selection model:
   - [x] Click-to-select in Preview (highlight).
   - [x] Hover toolbars (edit / duplicate / move / delete).
   - [x] Inline rename section labels.
-- [ ] Inline editing:
+- [x] Inline editing:
   - [x] `hero` headline/subheadline inline.
   - [x] `contact_form` headline/submit inline.
   - [x] `rich_text` inline (contenteditable + sanitizer on blur).
@@ -75,7 +75,7 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] global typography scale + font choices
   - [x] color palette tokens (bg/text/accent)
   - [x] spacing scale
-- [ ] Component styling UI:
+- [x] Component styling UI:
   - [x] alignment, spacing, max-width
   - [x] background/gradient controls
   - [x] button style controls
