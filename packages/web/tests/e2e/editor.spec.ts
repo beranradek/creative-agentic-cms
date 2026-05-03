@@ -254,6 +254,31 @@ test("section auto padding matches server default in React preview", async ({ pa
   expect(bg).toBe("rgba(255, 255, 255, 0.96)");
 });
 
+test("section auto max width falls back to 980px in React preview", async ({ page }) => {
+  await page.goto("/");
+
+  const projectId = `e2e_section_auto_maxwidth_${Date.now()}`;
+  await loadProject(page, projectId);
+
+  await ensurePaletteTab(page, "add");
+  await page.getByTestId("add-hero").click();
+
+  await page.getByTestId("preview-section-handle").first().click();
+  await expect(page.getByTestId("section-maxwidth")).toBeVisible();
+
+  await page.getByTestId("section-maxwidth").selectOption("720");
+
+  const section = page.getByTestId("preview-section").first();
+  const maxWidthBefore = await section.evaluate((el) => getComputedStyle(el).maxWidth);
+  expect(maxWidthBefore).toBe("720px");
+
+  const row = page.getByTestId("section-maxwidth").locator("..");
+  await row.getByRole("button", { name: "Auto" }).click();
+
+  const maxWidthAfter = await section.evaluate((el) => getComputedStyle(el).maxWidth);
+  expect(maxWidthAfter).toBe("980px");
+});
+
 test("server-rendered preview can be opened (renderer parity spot-check)", async ({ page }) => {
   await page.goto("/");
 
