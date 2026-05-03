@@ -22,8 +22,8 @@ It is organized by milestones and designed to be executed incrementally with con
   - [x] Strong defaults (required-but-nullable where needed for structured outputs).
 - [ ] Renderer parity:
   - [x] Add “Server (saved)” preview mode in web UI (iframe) for parity checks.
-  - [ ] Keep `web Preview` and `server export` rendering aligned (same semantics).
-  - [ ] Add new components in both places (preview + export) together.
+  - [x] Keep `web Preview` and `server export` rendering aligned (same semantics).
+  - [x] Add new components in both places (preview + export) together.
 
 ## Milestone 2 — Drag & Drop (full, intuitive)
 
