@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "pnpm -w lint",
     "test": "vitest run -c vitest.config.ts --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=0 playwright test"
   },
   "dependencies": {
     "@cac/shared": "workspace:*",

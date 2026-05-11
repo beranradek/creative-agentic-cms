@@ -83,6 +83,12 @@ function requireEditorSession(req: express.Request, res: express.Response, next:
     return;
   }
 
+  const tokenQuery = typeof req.query.token === "string" ? req.query.token : null;
+  if (tokenQuery && tokenQuery === apiSessionToken) {
+    next();
+    return;
+  }
+
   res.status(401).json({ error: "Unauthorized." });
 }
 

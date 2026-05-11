@@ -245,6 +245,7 @@ export function ThemePanel(props: ThemePanelProps) {
             <label>Radius</label>
             <input
               inputMode="numeric"
+              data-testid="theme-radius"
               value={String(page.theme.radius ?? resolvedTheme.radius)}
               disabled={!canEdit}
               onChange={(e) => {

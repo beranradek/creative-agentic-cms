@@ -377,15 +377,27 @@ test("sections can be reordered via drag and drop in Preview", async ({ page }) 
   await expect(wraps).toHaveCount(2);
 
   // Move first section after the second by dropping to the bottom half of the target.
+  await handles.nth(0).scrollIntoViewIfNeeded();
+  await wraps.nth(1).scrollIntoViewIfNeeded();
+  const sourceBox = await handles.nth(0).boundingBox();
   const targetBox = await wraps.nth(1).boundingBox();
+  if (!sourceBox) throw new Error("Missing section handle bounding box");
   if (!targetBox) throw new Error("Missing section target bounding box");
-  await handles.nth(0).dragTo(wraps.nth(1), { targetPosition: { x: Math.max(2, Math.floor(targetBox.width / 2)), y: Math.max(2, Math.floor(targetBox.height - 2)) } });
+  const src = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
+  const dst = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + Math.max(2, targetBox.height - 6) };
+  await page.mouse.move(src.x, src.y);
+  await page.mouse.down();
+  await page.mouse.move(dst.x, dst.y);
+  await page.mouse.up();
 
-  const types = await page.getByTestId("preview-item").evaluateAll((els) =>
-    els.map((el) => el.getAttribute("data-component-type"))
-  );
-  expect(types[0]).toBe("rich_text");
-  expect(types[1]).toBe("hero");
+  await expect(page.getByTestId("preview-item")).toHaveCount(2);
+  await expect
+    .poll(
+      async () =>
+        await page.getByTestId("preview-item").evaluateAll((els) => els.map((el) => el.getAttribute("data-component-type"))),
+      { timeout: 10_000 }
+    )
+    .toEqual(["rich_text", "hero"]);
 });
 
 test("section auto padding matches server default in React preview", async ({ page }) => {
@@ -609,7 +621,8 @@ test("inspector can add a divider into an existing section", async ({ page }) =>
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByTestId("inspector-add-divider").click();
 
   await expect(page.locator('[data-testid="preview-item"][data-component-type="hero"]')).toHaveCount(1);
@@ -628,7 +641,8 @@ test("inspector supports multi-select (shift) and bulk remove", async ({ page })
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-text").click();
 
-  const sectionCard = page.getByTestId("structure-section-card").first();
+  await ensurePaletteTab(page, "sections");
+  const sectionCard = page.getByTestId("sections-section-card").first();
   await sectionCard.getByRole("button", { name: "Select" }).click();
   await page.getByRole("button", { name: "+ Form" }).click();
   await page.getByRole("button", { name: "+ Hero" }).click();
@@ -665,7 +679,8 @@ test("structure Move here moves multi-selected components", async ({ page }) => 
   await page.getByTestId("add-text").click();
   await page.getByTestId("add-text").click();
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
 
   await cards.nth(0).getByRole("button", { name: "Select" }).click();
@@ -685,8 +700,11 @@ test("structure Move here moves multi-selected components", async ({ page }) => 
   await expect(cards.nth(1)).toContainText("4 components");
 
   await saveAndReload(page);
-  await expect(cards.nth(0)).toContainText("0 components");
-  await expect(cards.nth(1)).toContainText("4 components");
+  await ensurePaletteTab(page, "sections");
+  const cardsAfter = page.getByTestId("sections-section-card");
+  await expect(cardsAfter).toHaveCount(2);
+  await expect(cardsAfter.nth(0)).toContainText("0 components");
+  await expect(cardsAfter.nth(1)).toContainText("4 components");
 });
 
 test("structure dropzone moves multi-selected components as a group", async ({ page }) => {
@@ -699,7 +717,8 @@ test("structure dropzone moves multi-selected components as a group", async ({ p
   await page.getByTestId("add-text").click();
   await page.getByTestId("add-text").click();
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
 
   await cards.nth(0).getByRole("button", { name: "Select" }).click();
@@ -713,7 +732,7 @@ test("structure dropzone moves multi-selected components as a group", async ({ p
   await selects.nth(2).click();
   await page.keyboard.up("Shift");
 
-  const dropzone = cards.nth(1).getByTestId("structure-component-dropzone");
+  const dropzone = cards.nth(1).getByTestId("sections-component-dropzone");
   const hero = page.locator('[data-testid="preview-item"][data-component-type="hero"]');
   await expect(hero).toHaveCount(1);
   await hero.dragTo(dropzone, { force: true });
@@ -732,7 +751,8 @@ test("preview dropzone moves multi-selected components as a group", async ({ pag
   await page.getByTestId("add-text").click();
   await page.getByTestId("add-text").click();
 
-  const cards = page.getByTestId("structure-section-card");
+  await ensurePaletteTab(page, "sections");
+  const cards = page.getByTestId("sections-section-card");
   await expect(cards).toHaveCount(2);
 
   await cards.nth(0).getByRole("button", { name: "Select" }).click();
@@ -760,8 +780,11 @@ test("preview dropzone moves multi-selected components as a group", async ({ pag
   await expect(cards.nth(1)).toContainText("4 components");
 
   await saveAndReload(page);
-  await expect(cards.nth(0)).toContainText("0 components");
-  await expect(cards.nth(1)).toContainText("4 components");
+  await ensurePaletteTab(page, "sections");
+  const cardsAfter = page.getByTestId("sections-section-card");
+  await expect(cardsAfter).toHaveCount(2);
+  await expect(cardsAfter.nth(0)).toContainText("0 components");
+  await expect(cardsAfter.nth(1)).toContainText("4 components");
 });
 
 test("hero can be edited inline in Preview and persists", async ({ page }) => {
@@ -1245,7 +1268,8 @@ test("image style (radius + max width) persists", async ({ page }) => {
     buffer: Buffer.from(PNG_1X1_BASE64, "base64"),
   });
 
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   const imageRow = page.locator('[data-testid="inspector-component-row"][data-component-type="image"]');
   await expect(imageRow).toBeVisible();
   await imageRow.getByRole("button", { name: "image" }).click();
@@ -1308,14 +1332,16 @@ test("exported section inline radius follows theme preset", async ({ page }) => 
   const projectId = `e2e_theme_radius_${Date.now()}`;
   await loadProject(page, projectId);
 
+  await ensurePaletteTab(page, "theme");
   await expect(page.getByTestId("theme-preset")).toBeVisible();
   await page.getByTestId("theme-preset").selectOption("editorial");
 
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
-  await expect(page.getByTestId("structure-section-card").first()).toBeVisible();
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await expect(page.getByTestId("sections-section-card").first()).toBeVisible();
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByTestId("section-bg").fill("#ff0000");
   await page.getByTestId("section-padding").evaluate((el, value) => {
     const input = el as HTMLInputElement;
@@ -1350,10 +1376,12 @@ test("exported section radius follows explicit theme override", async ({ page })
   await ensurePaletteTab(page, "add");
   await page.getByTestId("add-hero").click();
 
+  await ensurePaletteTab(page, "theme");
   await expect(page.getByTestId("theme-radius")).toBeVisible();
   await page.getByTestId("theme-radius").fill("6");
 
-  await page.getByTestId("structure-section-card").first().getByRole("button", { name: "Select" }).click();
+  await ensurePaletteTab(page, "sections");
+  await page.getByTestId("sections-section-card").first().getByRole("button", { name: "Select" }).click();
   await page.getByTestId("section-bg").fill("#ff0000");
   await page.getByTestId("section-padding").evaluate((el, value) => {
     const input = el as HTMLInputElement;
@@ -1414,7 +1442,7 @@ test("exported HTML includes section + image styles", async ({ page }) => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, "24");
 
-  const sectionCards = page.getByTestId("structure-section-card");
+  const sectionCards = page.getByTestId("sections-section-card");
   await expect(sectionCards).toHaveCount(3);
   await sectionCards.nth(2).getByRole("button", { name: "Select" }).click();
 

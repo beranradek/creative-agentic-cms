@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-const SERVER_URL = "http://localhost:5174/api/projects";
+const SERVER_URL = "http://localhost:5174/api/health";
 const WEB_URL = "http://localhost:4173/";
 
 function spawnChild(command, args, options) {
@@ -48,4 +48,3 @@ await Promise.all([waitForOk(SERVER_URL, 60_000), waitForOk(WEB_URL, 60_000)]);
 
 // Keep process alive for Playwright.
 await new Promise(() => {});
-

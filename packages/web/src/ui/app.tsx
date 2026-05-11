@@ -649,7 +649,7 @@ const ExportConfigSchema = z.object({
 type ExportConfig = z.infer<typeof ExportConfigSchema>;
 
 async function apiGetExportConfig(projectId: string): Promise<ExportConfig> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`);
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`);
   const json = (await res.json().catch(() => null)) as unknown;
   if (!res.ok) throw new Error(`Failed to load export config (${res.status})`);
   const config = (json as { config?: unknown }).config;
@@ -657,7 +657,7 @@ async function apiGetExportConfig(projectId: string): Promise<ExportConfig> {
 }
 
 async function apiPutExportConfig(projectId: string, config: ExportConfig): Promise<ExportConfig> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/export-config`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(config),
@@ -809,7 +809,7 @@ async function apiCreatePlaceholderImage(
   projectId: string,
   input: { text: string; width?: number; height?: number; alt?: string }
 ): Promise<Asset> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images/placeholder`, {
+  const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/assets/images/placeholder`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -1023,6 +1023,7 @@ export function App() {
   const [isCreatingPlaceholder, setIsCreatingPlaceholder] = useState(false);
   const [previewDeviceWidth, setPreviewDeviceWidth] = useState<number | null>(null);
   const [previewRenderer, setPreviewRenderer] = useState<"react" | "server_saved" | "server_draft">("react");
+  const [serverPreviewToken, setServerPreviewToken] = useState<string | null>(null);
   const [serverDraftHtml, setServerDraftHtml] = useState<string | null>(null);
   const [isRenderingServerDraft, setIsRenderingServerDraft] = useState(false);
   const [agentText, setAgentText] = useState("");
@@ -1330,7 +1331,7 @@ export function App() {
     async (pageToRender: Page) => {
       setIsRenderingServerDraft(true);
       try {
-        const res = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/preview/render`, {
+        const res = await apiFetch(`/api/projects/${encodeURIComponent(activeProjectId)}/preview/render`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(pageToRender),
@@ -1754,19 +1755,28 @@ export function App() {
         const fromSection = prev.sections.find((section) => section.components.some((component) => component.id === fromComponentId));
         const toSection = prev.sections.find((section) => section.id === sectionId);
         if (!fromSection || !toSection) return prev;
-        const nextSections = moveComponentByIndex({
-          sections: prev.sections,
-          fromSectionId: fromSection.id,
-          fromComponentId,
-          toSectionId: sectionId,
-          toIndex: toSection.components.length,
-        });
+        const wantsGroupMove = selectedComponentIds.length > 1 && selectedComponentIds.includes(fromComponentId);
+        const nextSections = wantsGroupMove
+          ? moveComponentsByIndex({
+              sections: prev.sections,
+              fromSectionId: fromSection.id,
+              fromComponentIds: selectedComponentIds,
+              toSectionId: sectionId,
+              toIndex: toSection.components.length,
+            })
+          : moveComponentByIndex({
+              sections: prev.sections,
+              fromSectionId: fromSection.id,
+              fromComponentId,
+              toSectionId: sectionId,
+              toIndex: toSection.components.length,
+            });
         return PageSchema.parse({ ...prev, sections: nextSections });
       });
 
       setSelected({ sectionId, componentId: fromComponentId });
     },
-    [canEdit, selected, updatePage]
+    [canEdit, selected, selectedComponentIds, updatePage]
   );
 
   const dropComponentIntoSection = useCallback(
@@ -1775,13 +1785,22 @@ export function App() {
         const fromSection = prev.sections.find((section) => section.components.some((component) => component.id === componentId));
         const toSection = prev.sections.find((section) => section.id === sectionId);
         if (!fromSection || !toSection) return prev;
-        const nextSections = moveComponentByIndex({
-          sections: prev.sections,
-          fromSectionId: fromSection.id,
-          fromComponentId: componentId,
-          toSectionId: sectionId,
-          toIndex: toSection.components.length,
-        });
+        const wantsGroupMove = selected?.sectionId === fromSection.id && selectedComponentIds.length > 1 && selectedComponentIds.includes(componentId);
+        const nextSections = wantsGroupMove
+          ? moveComponentsByIndex({
+              sections: prev.sections,
+              fromSectionId: fromSection.id,
+              fromComponentIds: selectedComponentIds,
+              toSectionId: sectionId,
+              toIndex: toSection.components.length,
+            })
+          : moveComponentByIndex({
+              sections: prev.sections,
+              fromSectionId: fromSection.id,
+              fromComponentId: componentId,
+              toSectionId: sectionId,
+              toIndex: toSection.components.length,
+            });
         return PageSchema.parse({ ...prev, sections: nextSections });
       });
 
@@ -1789,7 +1808,7 @@ export function App() {
         prevSel?.componentId === componentId ? { sectionId, componentId } : prevSel
       );
     },
-    [updatePage]
+    [selected, selectedComponentIds, updatePage]
   );
 
   const reorderSectionByDrop = useCallback(
@@ -3166,6 +3185,8 @@ export function App() {
                     } else if (page && isDirty) {
                       toast.info("Server preview uses saved page", "Save to refresh the server-rendered preview.");
                     }
+                    const token = await ensureApiSessionToken();
+                    setServerPreviewToken(token);
                     setPreviewRenderer("server_saved");
                   })()
                 }
@@ -3238,7 +3259,9 @@ export function App() {
                 <iframe
                   data-testid="server-preview-frame"
                   title="Server preview (saved)"
-                  src={`/api/projects/${encodeURIComponent(activeProjectId)}/preview`}
+                  src={`/api/projects/${encodeURIComponent(activeProjectId)}/preview?token=${encodeURIComponent(
+                    serverPreviewToken ?? ""
+                  )}`}
                   style={{
                     width: "100%",
                     height: "100%",
